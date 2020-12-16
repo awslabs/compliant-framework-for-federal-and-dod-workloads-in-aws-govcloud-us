@@ -1,0 +1,96 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pCentralAccountId:
+    Type: String
+
+  pLoggingAccountId:
+    Type: String
+
+  pConfigDeliveryFrequency:
+    Type: String
+    Default: Three_Hours
+
+  pPrimaryRegion:
+    Type: String
+
+Conditions:
+  cIsCentralAccount: !Equals [!Ref AWS::AccountId, !Ref pCentralAccountId]
+  cIsPrimaryRegion: !Equals [!Ref AWS::Region, !Ref pPrimaryRegion]
+  cIsPrimaryRegionAndCentralAccount: !And
+    - !Condition cIsCentralAccount
+    - !Condition cIsPrimaryRegion
+
+Resources:
+  #
+  # AWS Config
+  #
+  rConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Properties:
+      S3BucketName: !Sub config-${pLoggingAccountId}-${pPrimaryRegion}
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: !Ref pConfigDeliveryFrequency
+
+  rConfigConfigurationRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      RoleARN: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ConfigRole
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: !If [cIsPrimaryRegion, true, false]
+
+  rConfigRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+    Condition: cIsPrimaryRegion
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ConfigRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSConfigRole
+
+  rConfigAggregator:
+    Condition: cIsPrimaryRegionAndCentralAccount
+    Type: AWS::Config::ConfigurationAggregator
+    Properties:
+      OrganizationAggregationSource:
+        AllAwsRegions: True
+        RoleArn: !GetAtt rConfigAggregatorRole.Arn
+      ConfigurationAggregatorName: config-aggregator
+
+  rConfigAggregatorRole:
+    Condition: cIsPrimaryRegionAndCentralAccount
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSConfigRoleForOrganizations

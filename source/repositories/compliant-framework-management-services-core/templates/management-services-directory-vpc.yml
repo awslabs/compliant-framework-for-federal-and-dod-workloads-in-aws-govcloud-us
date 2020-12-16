@@ -1,0 +1,420 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  # VPC Info
+  pName:
+    Type: String
+  pVpcCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/cidr
+  pInstanceTenancy:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/instance-tenancy
+
+  # Application Subnet Info
+  pApplicationSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/application-subnet/a/cidr
+  pApplicationSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/application-subnet/b/cidr
+
+  # Data Subnet Info
+  pDataSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/data-subnet/a/cidr
+  pDataSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/data-subnet/b/cidr
+
+  # Transit Gateway Attachment Subnet Info
+  pTransitGatewayAttachmentSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/tgw-attach-subnet/a/cidr
+  pTransitGatewayAttachmentSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/directory-vpc/tgw-attach-subnet/b/cidr
+
+  # Transit Gateway ID
+  pTransitGatewayId:
+    Type: String
+
+  # Log Destination Info
+  pLoggingBucketArn:
+    Type: String
+
+Resources:
+  #
+  # VPC
+  #
+  rVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref pVpcCidr
+      EnableDnsHostnames: True
+      EnableDnsSupport: True
+      InstanceTenancy: !Ref pInstanceTenancy
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-vpc
+  rVpcFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 365
+  rVpcFlowLogCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: !GetAtt rVpcFlowLogGroup.Arn
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+  rVpcFlowLogCloudWatch:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt rVpcFlowLogCloudWatchRole.Arn
+      LogDestination: !GetAtt rVpcFlowLogGroup.Arn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+  rVpcFlowLogS3:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      LogDestinationType: s3
+      LogDestination: !Ref pLoggingBucketArn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+
+  #
+  # SUBNETS
+  #
+  rApplicationSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pApplicationSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-app-subnet-a
+  rApplicationSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pApplicationSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-app-subnet-b
+  rDataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pDataSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-data-subnet-a
+  rDataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pDataSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-data-subnet-b
+  rTransitGatewayAttachmentSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTransitGatewayAttachmentSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-a
+  rTransitGatewayAttachmentSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTransitGatewayAttachmentSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-b
+
+  #
+  # ROUTE TABLES
+  #
+  rApplicationRtA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-app-subnet-rt-a
+  rApplicationSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rApplicationSubnetA
+      RouteTableId: !Ref rApplicationRtA
+  rApplicationRtB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-app-subnet-rt-b
+  rApplicationSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rApplicationSubnetB
+      RouteTableId: !Ref rApplicationRtB
+  rDataRtA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-data-subnet-rt-a
+  rDataSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rDataSubnetA
+      RouteTableId: !Ref rDataRtA
+
+  rDataRtB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-data-subnet-rt-b
+  rDataSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rDataSubnetB
+      RouteTableId: !Ref rDataRtB
+
+  rTransitGatewayAttachmentRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-rt
+  rTransitGatewayAttachmentSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetA
+      RouteTableId: !Ref rTransitGatewayAttachmentRt
+  rTransitGatewayAttachmentSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetB
+      RouteTableId: !Ref rTransitGatewayAttachmentRt
+
+  #
+  # TRANSIT GATEWAY ATTACHMENT / ROUTING
+  #
+  rTransitGatewayAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      SubnetIds:
+        - !Ref rTransitGatewayAttachmentSubnetA
+        - !Ref rTransitGatewayAttachmentSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attachment
+      TransitGatewayId: !Ref pTransitGatewayId
+      VpcId: !Ref rVpc
+
+  # Send All Traffic to TGW [App A]
+  rVpcApplicationRtATgwRouteRfc1918Route1:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rApplicationRtA
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref pTransitGatewayId
+
+  # Send All Traffic to TGW [App B]
+  rVpcApplicationRtBTgwRouteRfc1918Route1:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rApplicationRtB
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref pTransitGatewayId
+
+  # VPC Endpoints
+  rVpcEndpointSg:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W29
+          - id: W27
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref rVpc
+      GroupDescription: Allow All
+      SecurityGroupIngress:
+        - Description: All TCP
+          IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: !Ref pVpcCidr
+        - Description: All UDP
+          IpProtocol: udp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: !Ref pVpcCidr
+        - Description: All ICMP
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: !Ref pVpcCidr
+      SecurityGroupEgress:
+        - Description: All TCP
+          IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: !Ref pVpcCidr
+        - Description: All UDP
+          IpProtocol: udp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: !Ref pVpcCidr
+        - Description: All ICMP
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: !Ref pVpcCidr
+  rVpcEndpointSsm:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref rVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+      SubnetIds:
+        - !Ref rApplicationSubnetA
+        - !Ref rApplicationSubnetB
+      VpcEndpointType: Interface
+      VpcId: !Ref rVpc
+  rVpcEndpointSsmMessages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref rVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+      SubnetIds:
+        - !Ref rApplicationSubnetA
+        - !Ref rApplicationSubnetB
+      VpcEndpointType: Interface
+      VpcId: !Ref rVpc
+  rVpcEndpointEc2Messages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref rVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+      SubnetIds:
+        - !Ref rApplicationSubnetA
+        - !Ref rApplicationSubnetB
+      VpcEndpointType: Interface
+      VpcId: !Ref rVpc
+  rVpcEndpointS3:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds:
+        - !Ref rApplicationRtA
+        - !Ref rApplicationRtB
+      VpcEndpointType: Gateway
+      VpcId: !Ref rVpc
+  rVpcEndpointEfs:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref rVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.elasticfilesystem
+      SubnetIds:
+        - !Ref rApplicationSubnetA
+        - !Ref rApplicationSubnetB
+      VpcEndpointType: Interface
+      VpcId: !Ref rVpc
+
+Outputs:
+  oVpcId:
+    Value: !Ref rVpc
+  oApplicationSubnetAId:
+    Value: !Ref rApplicationSubnetA
+  oApplicationSubnetBId:
+    Value: !Ref rApplicationSubnetB
+  oApplicationRtA:
+    Value: !Ref rApplicationRtA
+  oApplicationRtB:
+    Value: !Ref rApplicationRtB
+  oDataSubnetAId:
+    Value: !Ref rDataSubnetA
+  oDataSubnetBId:
+    Value: !Ref rDataSubnetB
+  oDataRtA:
+    Value: !Ref rDataRtA
+  oDataRtB:
+    Value: !Ref rDataRtB
+  oTransitGatewayAttachmentSubnetAId:
+    Value: !Ref rTransitGatewayAttachmentSubnetA
+  oTransitGatewayAttachmentSubnetBId:
+    Value: !Ref rTransitGatewayAttachmentSubnetB
+  oTransitGatewayAttachmentRtId:
+    Value: !Ref rTransitGatewayAttachmentRt
+  oTransitGatewayAttachmentId:
+    Value: !Ref rTransitGatewayAttachment

@@ -1,0 +1,1692 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pCentralAccountId:
+    Type: String
+
+  pManagementServicesAccountId:
+    Type: String
+
+  pConfigDeliveryFrequency:
+    Type: String
+    Default: Three_Hours
+
+  pNotificationsEmail:
+    Type: String
+
+  # pComplianceSet:
+  #   Type: String
+
+Conditions:
+  cIsNotGovCloud:
+    !Not [
+      !Or [
+        !Equals [!Sub "${AWS::Region}", us-gov-west-1],
+        !Equals [!Sub "${AWS::Region}", us-gov-east-1],
+      ],
+    ]
+  cIsNotGovCloudEast1: !Not [!Equals [!Ref AWS::Region, us-gov-east-1]]
+
+Resources:
+  #
+  # AWS CloudTrail
+  #
+  rCloudTrailCloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 365
+  rCloudTrailCloudWatchLogGroupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: allow-access-to-cw-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${rCloudTrailCloudWatchLogGroup}:log-stream:${AWS::AccountId}*
+
+  rCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      CloudWatchLogsLogGroupArn: !GetAtt rCloudTrailCloudWatchLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt rCloudTrailCloudWatchLogGroupRole.Arn
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      IsMultiRegionTrail: true
+      S3BucketName: !Sub cloudtrail-${pManagementServicesAccountId}-${AWS::Region}
+      EventSelectors:
+        - IncludeManagementEvents: true
+          DataResources:
+            - Values:
+                - !Sub "arn:${AWS::Partition}:s3:::"
+              Type: AWS::S3::Object
+            - Values:
+                - !Sub "arn:${AWS::Partition}:lambda"
+              Type: AWS::Lambda::Function
+          ReadWriteType: All
+      KMSKeyId: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${pManagementServicesAccountId}:alias/compliant-framework/logging/s3
+
+  #
+  # AWS Config
+  #
+  rConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Properties:
+      S3BucketName: !Sub config-${pManagementServicesAccountId}-${AWS::Region}
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: !Ref pConfigDeliveryFrequency
+
+  rConfigConfigurationRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      RoleARN: !GetAtt rConfigRole.Arn
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+
+  rConfigRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSConfigRole
+
+  #
+  # Security Hub
+  #
+  rSecurityHub:
+    DependsOn:
+      - rCloudTrail
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+      - rConfigRole
+      - rCloudTrailCloudWatchLogGroup
+      - rSecurityHubAlarmNotificationTopic
+    Type: AWS::SecurityHub::Hub
+
+  # Cross account access role to accept invites
+  rSecurityHubAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+          - id: W28
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SecurityHubAccessRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              "AWS": !Sub ${pCentralAccountId}
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: security-hub-accept-invite
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - securityhub:AcceptInvitation
+                  - securityhub:ListInvitations
+                Resource: "*"
+
+  rConfigureIamPolicyRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: cloudwatch-logs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*"
+        - PolicyName: iam-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:DeleteAccountPasswordPolicy
+                  - iam:UpdateAccountPasswordPolicy
+                Resource: "*"
+
+  rConfigureIamPolicyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import string
+          import cfnresponse
+          import boto3
+          from botocore.exceptions import ClientError
+          def handler(event, context):
+            print('event:')
+            print(json.dumps(event, indent=2, default=str))
+            iam_client = boto3.client('iam')
+            if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+              try:
+                response = iam_client.update_account_password_policy(
+                    MinimumPasswordLength=14,
+                    RequireSymbols=True,
+                    RequireNumbers=True,
+                    RequireUppercaseCharacters=True,
+                    RequireLowercaseCharacters=True,
+                    AllowUsersToChangePassword=True,
+                    MaxPasswordAge=90,
+                    PasswordReusePrevention=24,
+                    HardExpiry=True
+                )
+                print(json.dumps(response, indent=2, default=str))
+                cfnresponse.send(
+                  event, context, cfnresponse.SUCCESS, {})
+              except ClientError as ex:
+                print(ex)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})
+            elif event['RequestType'] == 'Delete':
+              try:
+                response = iam_client.delete_account_password_policy()
+              except ClientError as ex:
+                print(ex)
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            else:
+              cfnresponse.send(event, context, cfnresponse.FAILED, {})
+            return {}
+      Handler: index.handler
+      Runtime: python3.8
+      Timeout: 90
+      Role: !GetAtt rConfigureIamPolicyRole.Arn
+
+  rConfigureIamPolicy:
+    Type: Custom::ConfigureIamPolicy
+    Properties:
+      ServiceToken: !GetAtt rConfigureIamPolicyFunction.Arn
+
+  rSecurityHubAlarmNotificationTopicCmk:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Logging - S3 CMK
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-policy-1
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:ListGrants
+              - kms:GenerateRandom
+              - kms:TagResource
+              - kms:CreateAlias
+              - kms:ListKeyPolicies
+              - kms:ListResourceTags
+              - kms:CreateGrant
+              - kms:RevokeGrant
+              - kms:GetKeyPolicy
+              - kms:ListKeys
+              - kms:ListRetirableGrants
+              - kms:PutKeyPolicy
+              - kms:ListAliases
+              - kms:CancelKeyDeletion
+              - kms:DisableKey
+              - kms:DeleteAlias
+              - kms:DescribeKey
+              - kms:ImportKeyMaterial
+              - kms:UpdateKeyDescription
+              - kms:GetKeyRotationStatus
+              - kms:DeleteImportedKeyMaterial
+              - kms:DisableKeyRotation
+              - kms:UpdateAlias
+              - kms:UntagResource
+              - kms:RetireGrant
+              - kms:EnableKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:EnableKeyRotation
+              - kms:ScheduleKeyDeletion
+              - kms:GetParametersForImport
+              - kms:CreateKey
+            Resource: "*"
+          - Sid: Allow Cloudtrail use of the key
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyPair
+              - kms:GenerateDataKeyPairWithoutPlaintext
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+  rSecurityHubAlarmNotificationTopicCmkAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/compliant-framework/security-hub/sns
+      TargetKeyId: !Ref rSecurityHubAlarmNotificationTopicCmk
+
+  # CIS AWS Foundation Benchmark Topics
+  rSecurityHubAlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: SecurityHub-CIS-Alarms
+      KmsMasterKeyId: !Ref rSecurityHubAlarmNotificationTopicCmkAlias
+      Subscription:
+        - Endpoint: !Ref pNotificationsEmail
+          Protocol: email
+  # 1.1 – Avoid the use of the "root" account
+  rSecurityHubRootAccountMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: '{$.userIdentity.type="Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType !="AwsServiceEvent"}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: RootAccount
+          MetricValue: "1"
+  rSecurityHubRootAccountAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-1.1-RootAccountUsage
+      AlarmDescription: Alarm for usage of "root" account
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: RootAccountUsage
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.3 – Ensure a log metric filter and alarm exist for usage of "root" account
+  rSecurityHubRootAccountUsageMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: '{$.userIdentity.type="Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType !="AwsServiceEvent"}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: RootAccountUsage
+          MetricValue: "1"
+  rSecurityHubRootAccountUsageAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.3-RootAccountUsage
+      AlarmDescription: Alarm for usage of "root" account
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: RootAccountUsage
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.1 – Ensure a log metric filter and alarm exist for unauthorized API calls
+  rSecurityHubUnauthorizedAPICallsMetricFilter:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: '{($.errorCode="*UnauthorizedOperation") || ($.errorCode="AccessDenied*")}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: UnauthorizedAPICalls
+          MetricValue: "1"
+  rSecurityHubUnauthorizedAPICallsAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.1-UnauthorizedAPICalls
+      AlarmDescription: Alarm for unauthorized API calls
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: UnauthorizedAPICalls
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.2 – Ensure a log metric filter and alarm exist for AWS Management Console sign-in without MFA
+  rSecurityHubConsoleSigninWithoutMFAMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: '{($.eventName="ConsoleLogin") && ($.additionalEventData.MFAUsed !="Yes")}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: ConsoleSigninWithoutMFA
+          MetricValue: "1"
+  rSecurityHubConsoleSigninWithoutMFAAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.2-ConsoleSigninWithoutMFA
+      AlarmDescription: Alarm for AWS Management Console sign-in without MFA
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: ConsoleSigninWithoutMFA
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.4 – Ensure a log metric filter and alarm exist for IAM policy changes
+  rSecurityHubIAMPolicyChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventName=DeleteGroupPolicy) || ($.eventName=DeleteRolePolicy) || ($.eventName=DeleteUserPolicy) || ($.eventName=PutGroupPolicy) || ($.eventName=PutRolePolicy) || ($.eventName=PutUserPolicy) || ($.eventName=CreatePolicy) || ($.eventName=DeletePolicy) || ($.eventName=CreatePolicyVersion) || ($.eventName=DeletePolicyVersion) || ($.eventName=AttachRolePolicy) || ($.eventName=DetachRolePolicy) || ($.eventName=AttachUserPolicy) || ($.eventName=DetachUserPolicy) || ($.eventName=AttachGroupPolicy) || ($.eventName=DetachGroupPolicy)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: IAMPolicyChanges
+          MetricValue: "1"
+  rSecurityHubIAMPolicyChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.4-IAMPolicyChanges
+      AlarmDescription: Alarm for IAM policy changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: IAMPolicyChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.5 – Ensure a log metric filter and alarm exist for CloudTrail configuration changes
+  rSecurityHubCloudTrailChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventName=CreateTrail) || ($.eventName=UpdateTrail) || ($.eventName=DeleteTrail) || ($.eventName=StartLogging) || ($.eventName=StopLogging)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: CloudTrailChanges
+          MetricValue: "1"
+  rSecurityHubCloudTrailChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.5-CloudTrailChanges
+      AlarmDescription: Alarm for CloudTrail configuration changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: CloudTrailChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.6 – Ensure a log metric filter and alarm exist for AWS Management Console authentication failures
+  rSecurityHubConsoleAuthenticationFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: '{($.eventName=ConsoleLogin) && ($.errorMessage="Failed authentication")}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: ConsoleAuthenticationFailure
+          MetricValue: "1"
+  rSecurityHubConsoleAuthenticationFailureAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.6-ConsoleAuthenticationFailure
+      AlarmDescription: Alarm exist for AWS Management Console authentication failures
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: ConsoleAuthenticationFailure
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.7 – Ensure a log metric filter and alarm exist for disabling or scheduled deletion of customer created CMKs
+  rSecurityHubDisableOrDeleteCMKMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventSource=kms.amazonaws.com) && (($.eventName=DisableKey) || ($.eventName=ScheduleKeyDeletion))}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: DisableOrDeleteCMK
+          MetricValue: "1"
+  rSecurityHubDisableOrDeleteCMKAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.7-DisableOrDeleteCMK
+      AlarmDescription: Alarm for disabling or scheduled deletion of customer created CMKs
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: DisableOrDeleteCMK
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.8 – Ensure a log metric filter and alarm exist for S3 bucket policy changes
+  rSecurityHubS3BucketPolicyChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventSource=s3.amazonaws.com) && (($.eventName=PutBucketAcl) || ($.eventName=PutBucketPolicy) || ($.eventName=PutBucketCors) || ($.eventName=PutBucketLifecycle) || ($.eventName=PutBucketReplication) || ($.eventName=DeleteBucketPolicy) || ($.eventName=DeleteBucketCors) || ($.eventName=DeleteBucketLifecycle) || ($.eventName=DeleteBucketReplication))}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: S3BucketPolicyChanges
+          MetricValue: "1"
+  rSecurityHubS3BucketPolicyChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.8-S3BucketPolicyChanges.
+      AlarmDescription: Alarm for S3 bucket policy changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: S3BucketPolicyChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.9 – Ensure a log metric filter and alarm exist for AWS Config configuration changes
+  rSecurityHubAWSConfigChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventSource=config.amazonaws.com) && (($.eventName=StopConfigurationRecorder) || ($.eventName=DeleteDeliveryChannel) || ($.eventName=PutDeliveryChannel) || ($.eventName=PutConfigurationRecorder))}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: AWSConfigChanges
+          MetricValue: "1"
+  rSecurityHubAWSConfigChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.9-AWSConfigChanges
+      AlarmDescription: Alarm for AWS Config configuration changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: AWSConfigChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.10 – Ensure a log metric filter and alarm exist for security group changes
+  rSecurityHubSecurityGroupChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventName=AuthorizeSecurityGroupIngress) || ($.eventName=AuthorizeSecurityGroupEgress) || ($.eventName=RevokeSecurityGroupIngress) || ($.eventName=RevokeSecurityGroupEgress) || ($.eventName=CreateSecurityGroup) || ($.eventName=DeleteSecurityGroup)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: SecurityGroupChanges
+          MetricValue: "1"
+  rSecurityGroupChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.10-SecurityGroupChanges
+      AlarmDescription: Alarm for security group changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: SecurityGroupChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.11 – Ensure a log metric filter and alarm exist for changes to Network Access Control Lists (NACL)
+  rSecurityHubNetworkACLChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventName=CreateNetworkAcl) || ($.eventName=CreateNetworkAclEntry) || ($.eventName=DeleteNetworkAcl) || ($.eventName=DeleteNetworkAclEntry) || ($.eventName=ReplaceNetworkAclEntry) || ($.eventName=ReplaceNetworkAclAssociation)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: NetworkACLChanges
+          MetricValue: "1"
+  rSecurityHubNetworkACLChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.11-NetworkACLChanges
+      AlarmDescription: Alarm for changes to Network Access Control Lists (NACL)
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: NetworkACLChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.12 – Ensure a log metric filter and alarm exist for changes to network gateways
+  rSecurityHubNetworkGatewayChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventName=CreateCustomerGateway) || ($.eventName=DeleteCustomerGateway) || ($.eventName=AttachInternetGateway) || ($.eventName=CreateInternetGateway) || ($.eventName=DeleteInternetGateway) || ($.eventName=DetachInternetGateway)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: NetworkGatewayChanges
+          MetricValue: "1"
+  rSecurityHubNetworkGatewayChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.12-NetworkGatewayChanges
+      AlarmDescription: Alarm for changes to network gateways
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: NetworkGatewayChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.13 – Ensure a log metric filter and alarm exist for route table changes
+  rSecurityHubRouteTableChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventName=CreateRoute) || ($.eventName=CreateRouteTable) || ($.eventName=ReplaceRoute) || ($.eventName=ReplaceRouteTableAssociation) || ($.eventName=DeleteRouteTable) || ($.eventName=DeleteRoute) || ($.eventName=DisassociateRouteTable)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: RouteTableChanges
+          MetricValue: "1"
+  rRouteTableChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.13-RouteTableChanges
+      AlarmDescription: Alarm for route table changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: RouteTableChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.14 – Ensure a log metric filter and alarm exist for VPC changes
+  rSecurityHubVPCChangesMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref rCloudTrailCloudWatchLogGroup
+      FilterPattern: "{($.eventName=CreateVpc) || ($.eventName=DeleteVpc) || ($.eventName=ModifyVpcAttribute) || ($.eventName=AcceptVpcPeeringConnection) || ($.eventName=CreateVpcPeeringConnection) || ($.eventName=DeleteVpcPeeringConnection) || ($.eventName=RejectVpcPeeringConnection) || ($.eventName=AttachClassicLinkVpc) || ($.eventName=DetachClassicLinkVpc) || ($.eventName=DisableVpcClassicLink) || ($.eventName=EnableVpcClassicLink)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: VPCChanges
+          MetricValue: "1"
+  rSecurityHubVPCChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.14-VPCChanges
+      AlarmDescription: Alarm for VPC changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: VPCChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+
+  #
+  # Amazon GuardDuty
+  #
+  rGuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Properties:
+      DataSources:
+        S3Logs:
+          Enable: True
+      Enable: True
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+  #
+  # Amazon Inspector
+  #
+  #
+  # AWS IAM Access Analyzer
+  #
+  #
+  # Amazon Detective
+  #
+
+  # AccessRole for CFN Runner - Has full administrative access to build new
+  # resources via the Service Catalog products in the Management Services
+  rCfnRunnerAccountAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+          - id: W28
+          - id: F3
+          - id: F38
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CfnRunnerAccountAccessRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${pManagementServicesAccountId}:role/CompliantFrameworkCfnRunnerRole
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: cfn-runner
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: "*"
+                Resource: "*"
+
+  # This user has full access and can delegate permissions to every service and resource in AWS.
+  rAdministratorsAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompliantFrameworkAdministratorsAccessRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${pCentralAccountId}:role/CompliantFrameworkAdministratorsAccessRole
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
+
+  # This user monitors accounts for compliance with security requirements. This user can access logs
+  # and events to investigate potential security breaches or potential malicious activity.
+  rSecurityAuditorsAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompliantFrameworkSecurityAuditorsAccessRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${pCentralAccountId}:role/CompliantFrameworkSecurityAuditorsAccessRole
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/SecurityAudit
+
+  # This user can view a list of AWS resources and basic metadata in the account across all
+  # services. The user cannot read resource content or metadata that goes beyond the quota and list
+  # information for resources.
+  rViewOnlyAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompliantFrameworkViewOnlyAccessRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${pCentralAccountId}:role/CompliantFrameworkViewOnlyAccessRole
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess
+
+  ##################################################################################
+  #
+  #   Conformance Pack:
+  #     Operational Best Practices for CMMC Level 5
+  #
+  #   This conformance pack helps verify compliance with CMMC Level 5 requirements.
+  #
+  #
+  ##################################################################################
+  AccountPartOfOrganizations:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: account-part-of-organizations
+      Source:
+        Owner: AWS
+        SourceIdentifier: ACCOUNT_PART_OF_ORGANIZATIONS
+    Type: AWS::Config::ConfigRule
+  AlbHttpDropInvalidHeaderEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: alb-http-drop-invalid-header-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ElasticLoadBalancingV2::LoadBalancer
+      Source:
+        Owner: AWS
+        SourceIdentifier: ALB_HTTP_DROP_INVALID_HEADER_ENABLED
+    Type: AWS::Config::ConfigRule
+  AlbWafEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: alb-waf-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ElasticLoadBalancingV2::LoadBalancer
+      Source:
+        Owner: AWS
+        SourceIdentifier: ALB_WAF_ENABLED
+    Type: AWS::Config::ConfigRule
+  ApiGwCacheEnabledAndEncrypted:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: api-gw-cache-enabled-and-encrypted
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ApiGateway::Stage
+      Source:
+        Owner: AWS
+        SourceIdentifier: API_GW_CACHE_ENABLED_AND_ENCRYPTED
+    Type: AWS::Config::ConfigRule
+  ApiGwExecutionLoggingEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: api-gw-execution-logging-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ApiGateway::Stage
+          - AWS::ApiGatewayV2::Stage
+      Source:
+        Owner: AWS
+        SourceIdentifier: API_GW_EXECUTION_LOGGING_ENABLED
+    Type: AWS::Config::ConfigRule
+  CloudTrailEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: cloudtrail-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUD_TRAIL_ENABLED
+    Type: AWS::Config::ConfigRule
+  CloudtrailS3DataeventsEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: cloudtrail-s3-dataevents-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUDTRAIL_S3_DATAEVENTS_ENABLED
+    Type: AWS::Config::ConfigRule
+  CloudtrailSecurityTrailEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: cloudtrail-security-trail-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUDTRAIL_SECURITY_TRAIL_ENABLED
+    Type: AWS::Config::ConfigRule
+  CloudwatchAlarmActionCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: cloudwatch-alarm-action-check
+      InputParameters:
+        alarmActionRequired: "TRUE"
+        insufficientDataActionRequired: "TRUE"
+        okActionRequired: "FALSE"
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::CloudWatch::Alarm
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUDWATCH_ALARM_ACTION_CHECK
+    Type: AWS::Config::ConfigRule
+  CloudwatchLogGroupEncrypted:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: cloudwatch-log-group-encrypted
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUDWATCH_LOG_GROUP_ENCRYPTED
+    Type: AWS::Config::ConfigRule
+  CodebuildProjectEnvvarAwscredCheck:
+    Condition: cIsNotGovCloudEast1
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: codebuild-project-envvar-awscred-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::CodeBuild::Project
+      Source:
+        Owner: AWS
+        SourceIdentifier: CODEBUILD_PROJECT_ENVVAR_AWSCRED_CHECK
+    Type: AWS::Config::ConfigRule
+  CodebuildProjectSourceRepoUrlCheck:
+    Condition: cIsNotGovCloudEast1
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: codebuild-project-source-repo-url-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::CodeBuild::Project
+      Source:
+        Owner: AWS
+        SourceIdentifier: CODEBUILD_PROJECT_SOURCE_REPO_URL_CHECK
+    Type: AWS::Config::ConfigRule
+  CwLoggroupRetentionPeriodCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: cw-loggroup-retention-period-check
+      Source:
+        Owner: AWS
+        SourceIdentifier: CW_LOGGROUP_RETENTION_PERIOD_CHECK
+    Type: AWS::Config::ConfigRule
+  DbInstanceBackupEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: db-instance-backup-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::RDS::DBInstance
+      Source:
+        Owner: AWS
+        SourceIdentifier: DB_INSTANCE_BACKUP_ENABLED
+    Type: AWS::Config::ConfigRule
+  DynamodbAutoscalingEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: dynamodb-autoscaling-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::DynamoDB::Table
+      Source:
+        Owner: AWS
+        SourceIdentifier: DYNAMODB_AUTOSCALING_ENABLED
+    Type: AWS::Config::ConfigRule
+  DynamodbInBackupPlan:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: dynamodb-in-backup-plan
+      Source:
+        Owner: AWS
+        SourceIdentifier: DYNAMODB_IN_BACKUP_PLAN
+    Type: AWS::Config::ConfigRule
+  DynamodbPitrEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: dynamodb-pitr-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::DynamoDB::Table
+      Source:
+        Owner: AWS
+        SourceIdentifier: DYNAMODB_PITR_ENABLED
+    Type: AWS::Config::ConfigRule
+  EbsInBackupPlan:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: ebs-in-backup-plan
+      Source:
+        Owner: AWS
+        SourceIdentifier: EBS_IN_BACKUP_PLAN
+    Type: AWS::Config::ConfigRule
+  EbsOptimizedInstance:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: ebs-optimized-instance
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::Instance
+      Source:
+        Owner: AWS
+        SourceIdentifier: EBS_OPTIMIZED_INSTANCE
+    Type: AWS::Config::ConfigRule
+  Ec2InstanceDetailedMonitoringEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: ec2-instance-detailed-monitoring-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::Instance
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_INSTANCE_DETAILED_MONITORING_ENABLED
+    Type: AWS::Config::ConfigRule
+  Ec2InstanceNoPublicIp:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: ec2-instance-no-public-ip
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::Instance
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_INSTANCE_NO_PUBLIC_IP
+    Type: AWS::Config::ConfigRule
+  Ec2SecurityGroupAttachedToEni:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: ec2-security-group-attached-to-eni
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::SecurityGroup
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_SECURITY_GROUP_ATTACHED_TO_ENI
+    Type: AWS::Config::ConfigRule
+  Ec2VolumeInuseCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: ec2-volume-inuse-check
+      InputParameters:
+        deleteOnTermination: TRUE
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::Volume
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_VOLUME_INUSE_CHECK
+    Type: AWS::Config::ConfigRule
+  EfsInBackupPlan:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: efs-in-backup-plan
+      Source:
+        Owner: AWS
+        SourceIdentifier: EFS_IN_BACKUP_PLAN
+    Type: AWS::Config::ConfigRule
+  EipAttached:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: eip-attached
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::EIP
+      Source:
+        Owner: AWS
+        SourceIdentifier: EIP_ATTACHED
+    Type: AWS::Config::ConfigRule
+  ElasticacheRedisClusterAutomaticBackupCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elasticache-redis-cluster-automatic-backup-check
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELASTICACHE_REDIS_CLUSTER_AUTOMATIC_BACKUP_CHECK
+    Type: AWS::Config::ConfigRule
+  ElasticsearchInVpcOnly:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elasticsearch-in-vpc-only
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELASTICSEARCH_IN_VPC_ONLY
+    Type: AWS::Config::ConfigRule
+  ElasticsearchNodeToNodeEncryptionCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elasticsearch-node-to-node-encryption-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::Elasticsearch::Domain
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELASTICSEARCH_NODE_TO_NODE_ENCRYPTION_CHECK
+    Type: AWS::Config::ConfigRule
+  ElbAcmCertificateRequired:
+    Condition: cIsNotGovCloudEast1
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elb-acm-certificate-required
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ElasticLoadBalancing::LoadBalancer
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELB_ACM_CERTIFICATE_REQUIRED
+    Type: AWS::Config::ConfigRule
+  ElbCrossZoneLoadBalancingEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elb-cross-zone-load-balancing-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ElasticLoadBalancing::LoadBalancer
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELB_CROSS_ZONE_LOAD_BALANCING_ENABLED
+    Type: AWS::Config::ConfigRule
+  ElbDeletionProtectionEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elb-deletion-protection-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ElasticLoadBalancingV2::LoadBalancer
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELB_DELETION_PROTECTION_ENABLED
+    Type: AWS::Config::ConfigRule
+  ElbLoggingEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elb-logging-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ElasticLoadBalancing::LoadBalancer
+          - AWS::ElasticLoadBalancingV2::LoadBalancer
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELB_LOGGING_ENABLED
+    Type: AWS::Config::ConfigRule
+  ElbTlsHttpsListenersOnly:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: elb-tls-https-listeners-only
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::ElasticLoadBalancing::LoadBalancer
+      Source:
+        Owner: AWS
+        SourceIdentifier: ELB_TLS_HTTPS_LISTENERS_ONLY
+    Type: AWS::Config::ConfigRule
+  EmrKerberosEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: emr-kerberos-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: EMR_KERBEROS_ENABLED
+    Type: AWS::Config::ConfigRule
+  GuarddutyEnabledCentralized:
+    Condition: cIsNotGovCloudEast1
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: guardduty-enabled-centralized
+      Source:
+        Owner: AWS
+        SourceIdentifier: GUARDDUTY_ENABLED_CENTRALIZED
+    Type: AWS::Config::ConfigRule
+  GuarddutyNonArchivedFindings:
+    Condition: cIsNotGovCloudEast1
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: guardduty-non-archived-findings
+      InputParameters:
+        daysHighSev: "1"
+        daysLowSev: "30"
+        daysMediumSev: "7"
+      Source:
+        Owner: AWS
+        SourceIdentifier: GUARDDUTY_NON_ARCHIVED_FINDINGS
+    Type: AWS::Config::ConfigRule
+  IamGroupHasUsersCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: iam-group-has-users-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::IAM::Group
+      Source:
+        Owner: AWS
+        SourceIdentifier: IAM_GROUP_HAS_USERS_CHECK
+    Type: AWS::Config::ConfigRule
+  IamNoInlinePolicyCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: iam-no-inline-policy-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::IAM::User
+          - AWS::IAM::Role
+          - AWS::IAM::Group
+      Source:
+        Owner: AWS
+        SourceIdentifier: IAM_NO_INLINE_POLICY_CHECK
+    Type: AWS::Config::ConfigRule
+  IamUserGroupMembershipCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: iam-user-group-membership-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::IAM::User
+      Source:
+        Owner: AWS
+        SourceIdentifier: IAM_USER_GROUP_MEMBERSHIP_CHECK
+    Type: AWS::Config::ConfigRule
+  IamUserMfaEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: iam-user-mfa-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: IAM_USER_MFA_ENABLED
+    Type: AWS::Config::ConfigRule
+  InstancesInVpc:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: ec2-instances-in-vpc
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::Instance
+      Source:
+        Owner: AWS
+        SourceIdentifier: INSTANCES_IN_VPC
+    Type: AWS::Config::ConfigRule
+  InternetGatewayAuthorizedVpcOnly:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: internet-gateway-authorized-vpc-only
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::InternetGateway
+      Source:
+        Owner: AWS
+        SourceIdentifier: INTERNET_GATEWAY_AUTHORIZED_VPC_ONLY
+    Type: AWS::Config::ConfigRule
+  KmsCmkNotScheduledForDeletion:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: kms-cmk-not-scheduled-for-deletion
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::KMS::Key
+      Source:
+        Owner: AWS
+        SourceIdentifier: KMS_CMK_NOT_SCHEDULED_FOR_DELETION
+    Type: AWS::Config::ConfigRule
+  LambdaDlqCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: lambda-dlq-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::Lambda::Function
+      Source:
+        Owner: AWS
+        SourceIdentifier: LAMBDA_DLQ_CHECK
+    Type: AWS::Config::ConfigRule
+  LambdaInsideVpc:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: lambda-inside-vpc
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::Lambda::Function
+      Source:
+        Owner: AWS
+        SourceIdentifier: LAMBDA_INSIDE_VPC
+    Type: AWS::Config::ConfigRule
+  RdsInBackupPlan:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: rds-in-backup-plan
+      Source:
+        Owner: AWS
+        SourceIdentifier: RDS_IN_BACKUP_PLAN
+    Type: AWS::Config::ConfigRule
+  RdsLoggingEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: rds-logging-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::RDS::DBInstance
+      Source:
+        Owner: AWS
+        SourceIdentifier: RDS_LOGGING_ENABLED
+    Type: AWS::Config::ConfigRule
+  RedshiftClusterConfigurationCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: redshift-cluster-configuration-check
+      InputParameters:
+        clusterDbEncrypted: "TRUE"
+        loggingEnabled: "TRUE"
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::Redshift::Cluster
+      Source:
+        Owner: AWS
+        SourceIdentifier: REDSHIFT_CLUSTER_CONFIGURATION_CHECK
+    Type: AWS::Config::ConfigRule
+  RedshiftClusterPublicAccessCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: redshift-cluster-public-access-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::Redshift::Cluster
+      Source:
+        Owner: AWS
+        SourceIdentifier: REDSHIFT_CLUSTER_PUBLIC_ACCESS_CHECK
+    Type: AWS::Config::ConfigRule
+  RedshiftRequireTlsSsl:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: redshift-require-tls-ssl
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::Redshift::Cluster
+      Source:
+        Owner: AWS
+        SourceIdentifier: REDSHIFT_REQUIRE_TLS_SSL
+    Type: AWS::Config::ConfigRule
+  RootAccountHardwareMfaEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: root-account-hardware-mfa-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: ROOT_ACCOUNT_HARDWARE_MFA_ENABLED
+    Type: AWS::Config::ConfigRule
+  RootAccountMfaEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: root-account-mfa-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: ROOT_ACCOUNT_MFA_ENABLED
+    Type: AWS::Config::ConfigRule
+  S3BucketDefaultLockEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: s3-bucket-default-lock-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_DEFAULT_LOCK_ENABLED
+    Type: AWS::Config::ConfigRule
+  S3BucketPolicyGranteeCheck:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: s3-bucket-policy-grantee-check
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_POLICY_GRANTEE_CHECK
+    Type: AWS::Config::ConfigRule
+  S3BucketReplicationEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: s3-bucket-replication-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_REPLICATION_ENABLED
+    Type: AWS::Config::ConfigRule
+  S3BucketVersioningEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: s3-bucket-versioning-enabled
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::S3::Bucket
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_VERSIONING_ENABLED
+    Type: AWS::Config::ConfigRule
+  SagemakerEndpointConfigurationKmsKeyConfigured:
+    Condition: cIsNotGovCloudEast1
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: sagemaker-endpoint-configuration-kms-key-configured
+      Source:
+        Owner: AWS
+        SourceIdentifier: SAGEMAKER_ENDPOINT_CONFIGURATION_KMS_KEY_CONFIGURED
+    Type: AWS::Config::ConfigRule
+  SagemakerNotebookInstanceKmsKeyConfigured:
+    Condition: cIsNotGovCloudEast1
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: sagemaker-notebook-instance-kms-key-configured
+      Source:
+        Owner: AWS
+        SourceIdentifier: SAGEMAKER_NOTEBOOK_INSTANCE_KMS_KEY_CONFIGURED
+    Type: AWS::Config::ConfigRule
+  SecurityhubEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: securityhub-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: SECURITYHUB_ENABLED
+    Type: AWS::Config::ConfigRule
+  SnsEncryptedKms:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: sns-encrypted-kms
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::SNS::Topic
+      Source:
+        Owner: AWS
+        SourceIdentifier: SNS_ENCRYPTED_KMS
+    Type: AWS::Config::ConfigRule
+  VpcSgOpenOnlyToAuthorizedPorts:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: vpc-sg-open-only-to-authorized-ports
+      InputParameters:
+        authorizedTcpPorts: "443"
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::SecurityGroup
+      Source:
+        Owner: AWS
+        SourceIdentifier: VPC_SG_OPEN_ONLY_TO_AUTHORIZED_PORTS
+    Type: AWS::Config::ConfigRule
+  VpcVpn2TunnelsUp:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Properties:
+      ConfigRuleName: vpc-vpn-2-tunnels-up
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::VPNConnection
+      Source:
+        Owner: AWS
+        SourceIdentifier: VPC_VPN_2_TUNNELS_UP
+    Type: AWS::Config::ConfigRule
+  Wafv2LoggingEnabled:
+    DependsOn:
+      - rConfigDeliveryChannel
+      - rConfigConfigurationRecorder
+    Condition: cIsNotGovCloud
+    Properties:
+      ConfigRuleName: wafv2-logging-enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: WAFV2_LOGGING_ENABLED
+    Type: AWS::Config::ConfigRule

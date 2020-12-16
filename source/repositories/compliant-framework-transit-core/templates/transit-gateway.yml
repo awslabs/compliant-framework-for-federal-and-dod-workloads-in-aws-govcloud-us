@@ -1,0 +1,228 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pTransitGatewayAmazonSideAsn:
+    Type: String
+  pCentralAccountId:
+    Type: String
+  pPrincipalOrgId:
+    Type: String
+  pEnableDirectoryVpc:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  pEnableExternalAccessVpc:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  pEnableVpcFirewall:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  pEnableVirtualFirewall:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+
+Conditions:
+  cEnableDirectoryVpc: !Equals [true, !Ref pEnableDirectoryVpc]
+  cEnableExternalAccessVpc: !Equals [true, !Ref pEnableExternalAccessVpc]
+  cEnableVpcFirewall: !Equals [true, !Ref pEnableVpcFirewall]
+  cEnableVirtualFirewall: !Equals [true, !Ref pEnableVirtualFirewall]
+
+Resources:
+  rTransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      AmazonSideAsn: !Ref pTransitGatewayAmazonSideAsn
+      AutoAcceptSharedAttachments: enable
+      DefaultRouteTableAssociation: disable
+      DefaultRouteTablePropagation: disable
+      Tags:
+        - Key: Name
+          Value: transit-gateway
+
+  # Tenant workloads (non core applications)
+  rTransitGatewayInternalRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: internal-tgw-rt
+      TransitGatewayId: !Ref rTransitGateway
+  rTransitGatewayManagementServicesRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: management-services-tgw-rt
+      TransitGatewayId: !Ref rTransitGateway
+
+  # Directory Services (AD and DNS)
+  rTransitGatewayDirectoryRouteTable:
+    Condition: cEnableDirectoryVpc
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: directory-tgw-rt
+      TransitGatewayId: !Ref rTransitGateway
+
+  # Provides OOB access to management services
+  rTransitGatewayExternalAccessRouteTable:
+    Condition: cEnableExternalAccessVpc
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: external-access-tgw-rt
+      TransitGatewayId: !Ref rTransitGateway
+
+  # Virtual Firewall
+  rTransitGatewayFirewallRouteTable:
+    Condition: cEnableVirtualFirewall
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: firewall-tgw-rt
+      TransitGatewayId: !Ref rTransitGateway
+
+  # VPC Firewall
+  rTransitGatewayDmzRouteTable:
+    Condition: cEnableVpcFirewall
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: dmz-tgw-rt
+      TransitGatewayId: !Ref rTransitGateway
+  rTransitGatewayInspectionRouteTable:
+    Condition: cEnableVpcFirewall
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      Tags:
+        - Key: Name
+          Value: inspection-tgw-rt
+      TransitGatewayId: !Ref rTransitGateway
+
+  #
+  # Share Transit Gateway with Organization
+  #
+  rResourceShare:
+    Type: AWS::RAM::ResourceShare
+    Properties:
+      Name: transit-gateway-share
+      AllowExternalPrincipals: false
+      ResourceArns:
+        - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway/${rTransitGateway}
+      Principals:
+        - !Sub arn:${AWS::Partition}:organizations::${pCentralAccountId}:organization/${pPrincipalOrgId}
+
+  #
+  # Store values into SSM Parameter Store
+  #
+  rSsmParameterTransitGatewayId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/id
+      Type: String
+      Value: !Ref rTransitGateway
+  rSsmParameterTransitGatewayInternalRouteTableId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/internal-route-table/id
+      Type: String
+      Value: !Ref rTransitGatewayInternalRouteTable
+  rSsmParameterTransitGatewayManagementServicesRouteTableId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/management-services-route-table/id
+      Type: String
+      Value: !Ref rTransitGatewayManagementServicesRouteTable
+  rSsmParameterTransitGatewayDirectoryRouteTableId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/directory-route-table/id
+      Type: String
+      Value:
+        !If [
+          cEnableDirectoryVpc,
+          !Ref rTransitGatewayDirectoryRouteTable,
+          xxxxxx,
+        ]
+  rSsmParameterTransitGatewayExternalAccessRouteTableId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/external-access-route-table/id
+      Type: String
+      Value:
+        !If [
+          cEnableExternalAccessVpc,
+          !Ref rTransitGatewayExternalAccessRouteTable,
+          xxxxxx,
+        ]
+  rSsmParameterTransitGatewayFirewallRouteTableId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/firewall-route-table/id
+      Type: String
+      Value:
+        !If [
+          cEnableVirtualFirewall,
+          !Ref rTransitGatewayFirewallRouteTable,
+          xxxxxx,
+        ]
+  rSsmParameterTransitGatewayDmzRouteTableId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/dmz-route-table/id
+      Type: String
+      Value: !If [cEnableVpcFirewall, !Ref rTransitGatewayDmzRouteTable, xxxxxx]
+  rSsmParameterTransitGatewayInspectionRouteTableId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/transit-gateway/inspection-route-table/id
+      Type: String
+      Value:
+        !If [
+          cEnableVpcFirewall,
+          !Ref rTransitGatewayInspectionRouteTable,
+          xxxxxx,
+        ]
+
+Outputs:
+  oTransitGatewayId:
+    Value: !Ref rTransitGateway
+  oTransitGatewayInternalRouteTableId:
+    Value: !Ref rTransitGatewayInternalRouteTable
+  oTransitGatewayManagementServicesRouteTableId:
+    Value: !Ref rTransitGatewayManagementServicesRouteTable
+  oTransitGatewayDirectoryRouteTableId:
+    Condition: cEnableDirectoryVpc
+    Value: !Ref rTransitGatewayDirectoryRouteTable
+  oTransitGatewayExternalAccessRouteTableId:
+    Condition: cEnableExternalAccessVpc
+    Value: !Ref rTransitGatewayExternalAccessRouteTable
+  oTransitGatewayFirewallRouteTableId:
+    Condition: cEnableVirtualFirewall
+    Value: !Ref rTransitGatewayFirewallRouteTable
+  oTransitGatewayDmzRouteTableId:
+    Condition: cEnableVpcFirewall
+    Value: !Ref rTransitGatewayDmzRouteTable
+  oTransitGatewayInspectionRouteTableId:
+    Condition: cEnableVpcFirewall
+    Value: !Ref rTransitGatewayInspectionRouteTable

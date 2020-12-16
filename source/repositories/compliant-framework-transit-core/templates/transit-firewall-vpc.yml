@@ -1,0 +1,604 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pName:
+    Type: String
+
+  pVpcCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/cidr
+  pVpcNiprCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/nipr-cidr
+  pInstanceTenancy:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/instance-tenancy
+  pEnableIgw:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/igw/enabled
+  pAttachTgw:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/tgw/attached
+
+  # External Subnet Info
+  pExternalSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/external-subnet/a/cidr
+  pExternalSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/external-subnet/b/cidr
+
+  # Internal Subnet Info
+  pInternalSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/internal-subnet/a/cidr
+  pInternalSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/internal-subnet/b/cidr
+
+  # Management Subnet Info
+  pManagementSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/management-subnet/a/cidr
+  pManagementSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/management-subnet/b/cidr
+
+  # Transit Gateway Attachment Subnet Info
+  pTransitGatewayAttachmentSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/tgw-attach-subnet/a/cidr
+  pTransitGatewayAttachmentSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/tgw-attach-subnet/b/cidr
+
+  # Transit Gateway ID
+  pTransitGatewayId:
+    Type: String
+
+  pLoggingBucketArn:
+    Type: String
+
+Conditions:
+  cHasVpcNiprCidr: !Not [!Equals ["0.0.0.0/0", !Ref pVpcNiprCidr]]
+  cEnableIgw: !Equals [true, !Ref pEnableIgw]
+  cAttachTgw: !Equals [true, !Ref pAttachTgw]
+  cAddNatTgwRoute:
+    !And [!Equals [true, !Ref pEnableIgw], !Equals [true, !Ref pAttachTgw]]
+
+Resources:
+  #
+  # VPC
+  #
+  rVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref pVpcCidr
+      EnableDnsHostnames: True
+      EnableDnsSupport: True
+      InstanceTenancy: !Ref pInstanceTenancy
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-vpc
+  rVpcNiprCidr:
+    Condition: cHasVpcNiprCidr
+    Type: AWS::EC2::VPCCidrBlock
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pVpcNiprCidr
+  rVpcFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 365
+  rVpcFlowLogCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: !GetAtt rVpcFlowLogGroup.Arn
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+  rVpcFlowLogCloudWatch:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt rVpcFlowLogCloudWatchRole.Arn
+      LogDestination: !GetAtt rVpcFlowLogGroup.Arn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+  rVpcFlowLogS3:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      LogDestinationType: s3
+      LogDestination: !Ref pLoggingBucketArn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+
+  #
+  # SUBNETS
+  #
+  rExternalSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pExternalSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-external-subnet-a
+  rExternalSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pExternalSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-external-subnet-b
+  rInternalSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pInternalSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-internal-subnet-a
+  rInternalSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pInternalSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-internal-subnet-b
+  rManagementSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pManagementSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-management-subnet-a
+  rManagementSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pManagementSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref "AWS::Region"
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-management-subnet-b
+  rTransitGatewayAttachmentSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTransitGatewayAttachmentSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-a
+  rTransitGatewayAttachmentSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTransitGatewayAttachmentSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-b
+
+  #
+  # INTERNET GATEWAY
+  #
+  rIgw:
+    Condition: cEnableIgw
+    Type: AWS::EC2::InternetGateway
+    DependsOn: rVpc
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-igw
+  rAttachIgw:
+    Condition: cEnableIgw
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref rVpc
+      InternetGatewayId: !Ref rIgw
+
+  #
+  # TRANSIT GATEWAY ATTACHMENT / ROUTING
+  #
+  rTransitGatewayAttachment:
+    Condition: cAttachTgw
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      SubnetIds:
+        - !Ref rTransitGatewayAttachmentSubnetA
+        - !Ref rTransitGatewayAttachmentSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attachment
+      TransitGatewayId: !Ref pTransitGatewayId
+      VpcId: !Ref rVpc
+
+  # Send RFC1918 to TGW [App A]
+  rExternalRtATgwRouteRfc1918Route1:
+    Condition: cAttachTgw
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rExternalRtA
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref pTransitGatewayId
+  rExternalRtATgwRouteRfc1918Route2:
+    Condition: cAttachTgw
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rExternalRtA
+      DestinationCidrBlock: 172.16.0.0/12
+      TransitGatewayId: !Ref pTransitGatewayId
+  rExternalRtATgwRouteRfc1918Route3:
+    Condition: cAttachTgw
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rExternalRtA
+      DestinationCidrBlock: 192.168.0.0/16
+      TransitGatewayId: !Ref pTransitGatewayId
+
+  # Send RFC1918 to TGW [App B]
+  rExternalRtBTgwRouteRfc1918Route1:
+    Condition: cAttachTgw
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rExternalRtB
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref pTransitGatewayId
+  rExternalRtBTgwRouteRfc1918Route2:
+    Condition: cAttachTgw
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rExternalRtB
+      DestinationCidrBlock: 172.16.0.0/12
+      TransitGatewayId: !Ref pTransitGatewayId
+  rExternalRtBTgwRouteRfc1918Route3:
+    Condition: cAttachTgw
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rExternalRtB
+      DestinationCidrBlock: 192.168.0.0/16
+      TransitGatewayId: !Ref pTransitGatewayId
+
+  #
+  # ROUTE TABLES
+  #
+  rExternalRtA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-external-rt-a
+  rExternalRtB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-external-rt-b
+  rExternalRtAIgwRoute:
+    Condition: cEnableIgw
+    DependsOn: rAttachIgw
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: rExternalRtA
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref rIgw
+  rExternalRtBIgwRoute:
+    Condition: cEnableIgw
+    DependsOn: rAttachIgw
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: rExternalRtB
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref rIgw
+  rExternalSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rExternalSubnetA
+      RouteTableId: !Ref rExternalRtA
+  rExternalSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rExternalSubnetB
+      RouteTableId: !Ref rExternalRtB
+  rInternalRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-internal-rt
+  rInternalSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rInternalSubnetA
+      RouteTableId: !Ref rInternalRt
+  rInternalSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rInternalSubnetB
+      RouteTableId: !Ref rInternalRt
+  rManagementRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-management-rt
+  rManagementRtIgwRoute:
+    Condition: cEnableIgw
+    DependsOn: rAttachIgw
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: rManagementRt
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref rIgw
+  rManagementSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rManagementSubnetA
+      RouteTableId: !Ref rManagementRt
+  rManagementSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rManagementSubnetB
+      RouteTableId: !Ref rManagementRt
+  rTransitGatewayAttachmentRtA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-rt-a
+  rTransitGatewayAttachmentRtB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-rt-b
+  rTransitGatewayAttachmentSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetA
+      RouteTableId: !Ref rTransitGatewayAttachmentRtA
+  rTransitGatewayAttachmentSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetB
+      RouteTableId: !Ref rTransitGatewayAttachmentRtB
+
+  #
+  # NAT GATEWAYS
+  #
+  rNatGatewayA:
+    Condition: cEnableIgw
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt rNatGatewayEipA.AllocationId
+      SubnetId:
+        Ref: rExternalSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-a
+  rNatGatewayEipA:
+    Condition: cEnableIgw
+    DependsOn: rAttachIgw
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-eni-a
+  rTransitGatewayAttachmentRtANatGatewayRoute:
+    Condition: cAddNatTgwRoute
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rTransitGatewayAttachmentRtA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref rNatGatewayA
+
+  rNatGatewayB:
+    Condition: cEnableIgw
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt rNatGatewayEipB.AllocationId
+      SubnetId:
+        Ref: rExternalSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-b
+  rNatGatewayEipB:
+    Condition: cEnableIgw
+    DependsOn: rAttachIgw
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-eni-b
+  rTransitGatewayAttachmentRtBNatGatewayRoute:
+    Condition: cAddNatTgwRoute
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rTransitGatewayAttachmentRtB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref rNatGatewayB
+
+  #
+  # FIREWALL NETWORK INTERFACES
+  #
+  rFirewallAExternalEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref rExternalSubnetA
+  rFirewallBExternalEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref rExternalSubnetB
+  rFirewallAInternalEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref rInternalSubnetA
+      SourceDestCheck: false
+  rFirewallAInternalEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  rFirewallAInternalEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt rFirewallAInternalEip.AllocationId
+      NetworkInterfaceId: !Ref rFirewallAInternalEni
+  rFirewallBInternalEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref rInternalSubnetB
+      SourceDestCheck: false
+  rFirewallBInternalEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  rFirewallBInternalEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt rFirewallBInternalEip.AllocationId
+      NetworkInterfaceId: !Ref rFirewallBInternalEni
+  rFirewallAManagementEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref rManagementSubnetA
+  rFirewallBManagementEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref rManagementSubnetB
+
+Outputs:
+  oVpcId:
+    Value: !Ref rVpc
+  oInternalSubnetAId:
+    Value: !Ref rInternalSubnetA
+  oInternalSubnetBId:
+    Value: !Ref rInternalSubnetB
+  oInternalRtId:
+    Value: !Ref rInternalRt
+  oExternalSubnetAId:
+    Value: !Ref rExternalSubnetA
+  oExternalSubnetBId:
+    Value: !Ref rExternalSubnetB
+  oExternalRtAId:
+    Value: !Ref rExternalRtA
+  oExternalRtBId:
+    Value: !Ref rExternalRtB
+  oManagementSubnetAId:
+    Value: !Ref rManagementSubnetA
+  oManagementSubnetBId:
+    Value: !Ref rManagementSubnetB
+  oManagementRtId:
+    Value: !Ref rManagementRt
+  oFirewallAExternalEniId:
+    Value: !Ref rFirewallAExternalEni
+  oFirewallAExternalEniPrivateIpAddress:
+    Value: !GetAtt rFirewallAExternalEni.PrimaryPrivateIpAddress
+  # oFirewallAExternalEniPublicIpAddress:
+  #   Value: !Ref rFirewallAExternalEip
+  oFirewallBExternalEniId:
+    Value: !Ref rFirewallBExternalEni
+  oFirewallBExternalEniPrivateIpAddress:
+    Value: !GetAtt rFirewallBExternalEni.PrimaryPrivateIpAddress
+  # oFirewallBExternalEniPublicIpAddress:
+  #   Value: !Ref rFirewallBExternalEip
+  oFirewallAInternalEniId:
+    Value: !Ref rFirewallAInternalEni
+  oFirewallAInternalEniPrivateIpAddress:
+    Value: !GetAtt rFirewallAInternalEni.PrimaryPrivateIpAddress
+  oFirewallAInternalEniPublicIpAddress:
+    Value: !Ref rFirewallAInternalEip
+  oFirewallBInternalEniId:
+    Value: !Ref rFirewallBInternalEni
+  oFirewallBInternalEniPrivateIpAddress:
+    Value: !GetAtt rFirewallBInternalEni.PrimaryPrivateIpAddress
+  oFirewallBInternalEniPublicIpAddress:
+    Value: !Ref rFirewallBInternalEip
+  oFirewallAManagementEniId:
+    Value: !Ref rFirewallAManagementEni
+  oFirewallAManagementEniPrivateIpAddress:
+    Value: !GetAtt rFirewallAManagementEni.PrimaryPrivateIpAddress
+  # oFirewallAManagementEniPublicIpAddress:
+  #   Value: !If [cEnableIgw, !Ref rFirewallAManagementEip, ""]
+  oFirewallBManagementEniId:
+    Value: !Ref rFirewallBManagementEni
+  oFirewallBManagementEniPrivateIpAddress:
+    Value: !GetAtt rFirewallBManagementEni.PrimaryPrivateIpAddress
+  # oFirewallBManagementEniPublicIpAddress:
+  #   Value: !If [cEnableIgw, !Ref rFirewallBManagementEip, ""]
+  oFirewallVpcTransitGatewayAttachmentId:
+    Value: !If [cAttachTgw, !Ref rTransitGatewayAttachment, no-value]

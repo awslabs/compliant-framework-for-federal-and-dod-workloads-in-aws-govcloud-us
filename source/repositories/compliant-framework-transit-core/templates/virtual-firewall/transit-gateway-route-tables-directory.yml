@@ -1,0 +1,87 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pDirectoryRtId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/directory-route-table/id
+
+  pEnableExternalAccessVpc:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/external-access-vpc/enabled
+  pAttachFirewallVpc:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/tgw/attached
+
+  pFirewallVpcTgwAttachId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/tgw-attach/id
+  pVirtualFirewallAVpnId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/vpn-connection/a/id
+  pVirtualFirewallBVpnId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/firewall-vpc/vpn-connection/b/id
+
+  pManagementServicesVpcTgwAttachId:
+    Type: String
+  pDirectoryVpcTgwAttachId:
+    Type: String
+  pExternalAccessVpcTgwAttachId:
+    Type: String
+
+Conditions:
+  cEnableExternalAccessVpc: !Equals [true, !Ref pEnableExternalAccessVpc]
+  cAttachFirewallVpc: !Equals [true, !Ref pAttachFirewallVpc]
+
+Resources:
+  # Associations
+  rDirectoryRtAssociationDirectoryVpc:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pDirectoryVpcTgwAttachId
+      TransitGatewayRouteTableId: !Ref pDirectoryRtId
+  # Propagations
+  rDirectoryRtPropagationManagementServicesVpc:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pManagementServicesVpcTgwAttachId
+      TransitGatewayRouteTableId: !Ref pDirectoryRtId
+  rDirectoryRtPropagationExternalAccessVpc:
+    Condition: cEnableExternalAccessVpc
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pExternalAccessVpcTgwAttachId
+      TransitGatewayRouteTableId: !Ref pDirectoryRtId
+  # Routes (Static)
+  rDirectoryRtDefaultRouteFirewallVpc:
+    Condition: cAttachFirewallVpc
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayAttachmentId: !Ref pFirewallVpcTgwAttachId
+      TransitGatewayRouteTableId: !Ref pDirectoryRtId
+  # rDirectoryRtDefaultRouteVirtualFirewallVpnA:
+  #   Type: AWS::EC2::TransitGatewayRoute
+  #   Properties:
+  #     DestinationCidrBlock: 0.0.0.0/0
+  #     TransitGatewayAttachmentId: !Ref pVirtualFirewallAVpnId
+  #     TransitGatewayRouteTableId: !Ref pDirectoryRtId
+  # rDirectoryRtDefaultRouteVirtualFirewallVpnB:
+  #   Type: AWS::EC2::TransitGatewayRoute
+  #   Properties:
+  #     DestinationCidrBlock: 0.0.0.0/0
+  #     TransitGatewayAttachmentId: !Ref pVirtualFirewallBVpnId
+  #     TransitGatewayRouteTableId: !Ref pDirectoryRtId

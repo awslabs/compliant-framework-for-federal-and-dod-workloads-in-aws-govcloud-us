@@ -1,0 +1,507 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pName:
+    Type: String
+
+  pVpcCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/cidr
+  pInstanceTenancy:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/instance-tenancy
+  pPublicSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/public-subnet/a/cidr
+  pPublicSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/public-subnet/b/cidr
+  pFirewallSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/firewall-subnet/a/cidr
+  pFirewallSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/firewall-subnet/b/cidr
+  pTransitGatewayAttachmentSubnetACidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/tgw-attach-subnet/a/cidr
+  pTransitGatewayAttachmentSubnetBCidr:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/inspection-vpc/tgw-attach-subnet/b/cidr
+
+  pTransitGatewayId:
+    Type: String
+
+  pLoggingBucketArn:
+    Type: String
+
+Resources:
+  #
+  # VPC
+  #
+  rVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref pVpcCidr
+      EnableDnsHostnames: True
+      EnableDnsSupport: True
+      InstanceTenancy: !Ref pInstanceTenancy
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-vpc
+  rVpcFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 365
+  rVpcFlowLogCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: !GetAtt rVpcFlowLogGroup.Arn
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+  rVpcFlowLogCloudWatch:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt rVpcFlowLogCloudWatchRole.Arn
+      LogDestination: !GetAtt rVpcFlowLogGroup.Arn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+  rVpcFlowLogS3:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      LogDestinationType: s3
+      LogDestination: !Ref pLoggingBucketArn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+
+  #
+  # SUBNETS
+  #
+  rPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pPublicSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-public-subnet-a
+  rPublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pPublicSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-public-subnet-b
+  rFirewallSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pFirewallSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-firewall-subnet-a
+  rFirewallSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pFirewallSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-firewall-subnet-b
+  rTransitGatewayAttachmentSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTransitGatewayAttachmentSubnetACidr
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-a
+  rTransitGatewayAttachmentSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTransitGatewayAttachmentSubnetBCidr
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-b
+
+  #
+  # INTERNET GATEWAY
+  #
+  rIgw:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: rVpc
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-igw
+  rAttachIgw:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref rVpc
+      InternetGatewayId: !Ref rIgw
+
+  #
+  # NAT GATEWAYS
+  #
+  rNatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt rNatGatewayAEip.AllocationId
+      SubnetId:
+        Ref: rPublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-a
+  rNatGatewayAEip:
+    DependsOn: rAttachIgw
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-eni-a
+  rNatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt rNatGatewayBEip.AllocationId
+      SubnetId:
+        Ref: rPublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-b
+  rNatGatewayBEip:
+    DependsOn: rAttachIgw
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-nat-gateway-eni-b
+
+  #
+  # TGW Attachment
+  #
+  rTransitGatewayAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      SubnetIds:
+        - !Ref rTransitGatewayAttachmentSubnetA
+        - !Ref rTransitGatewayAttachmentSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attachment
+      TransitGatewayId: !Ref pTransitGatewayId
+      VpcId: !Ref rVpc
+
+  #
+  # ROUTE TABLES
+  #
+
+  #
+  # Public Route Table A
+  #
+  rPublicRtA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-public-subnet-rt-a
+  rPublicSubnetARtAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rPublicSubnetA
+      RouteTableId: !Ref rPublicRtA
+  rPublicRtAIgwRoute:
+    Type: AWS::EC2::Route
+    DependsOn: rAttachIgw
+    Properties:
+      RouteTableId: !Ref rPublicRtA
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref rIgw
+
+  #
+  # Public Route Table B
+  #
+  rPublicRtB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-public-subnet-rt-b
+  rPublicSubnetBRtAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rPublicSubnetB
+      RouteTableId: !Ref rPublicRtB
+  rPublicRtBIgwRoute:
+    Type: AWS::EC2::Route
+    DependsOn: rAttachIgw
+    Properties:
+      RouteTableId: !Ref rPublicRtB
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref rIgw
+
+  #
+  # Firewall Route Table A
+  #
+  rFirewallRtA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-firewall-subnet-rt-a
+  rFirewallSubnetRtAAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rFirewallSubnetA
+      RouteTableId: !Ref rFirewallRtA
+
+  # RFC1918 to TGW
+  rFirewallRtATgwRouteRfc1918Route1:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtA
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref pTransitGatewayId
+  rFirewallRtATgwRouteRfc1918Route2:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtA
+      DestinationCidrBlock: 172.16.0.0/12
+      TransitGatewayId: !Ref pTransitGatewayId
+  rFirewallRtATgwRouteRfc1918Route3:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtA
+      DestinationCidrBlock: 192.168.0.0/16
+      TransitGatewayId: !Ref pTransitGatewayId
+
+  # NAT Gateway Route
+  rFirewallRtANatGatewayARoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref rNatGatewayA
+
+  #
+  # Firewall Route Table B
+  #
+  rFirewallRtB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-firewall-subnet-rt-b
+  rFirewallSubnetRtBAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rFirewallSubnetB
+      RouteTableId: !Ref rFirewallRtB
+
+  # RFC1918 to TGW
+  rFirewallRtBTgwRouteRfc1918Route1:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtB
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref pTransitGatewayId
+  rFirewallRtBTgwRouteRfc1918Route2:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtB
+      DestinationCidrBlock: 172.16.0.0/12
+      TransitGatewayId: !Ref pTransitGatewayId
+  rFirewallRtBTgwRouteRfc1918Route3:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtB
+      DestinationCidrBlock: 192.168.0.0/16
+      TransitGatewayId: !Ref pTransitGatewayId
+
+  # NAT Gateway Route
+  rFirewallRtBNatGatewayBRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rFirewallRtB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref rNatGatewayB
+
+  #
+  # TGW Attach Route Table A
+  #
+  rTransitGatewayAttachmentRtA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-rt-a
+  rTransitGatewayAttachmentRtAAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetA
+      RouteTableId: !Ref rTransitGatewayAttachmentRtA
+
+  #
+  # TGW Attach Route Table A
+  #
+  rTransitGatewayAttachmentRtB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pName}-tgw-attach-subnet-rt-b
+  rTransitGatewayAttachmentRtBAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetB
+      RouteTableId: !Ref rTransitGatewayAttachmentRtB
+
+  rFirewallSecurityGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W2
+          - id: W5
+          - id: W9
+          - id: W27
+          - id: W29
+          - id: W42
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref rVpc
+      GroupDescription: VPC Firewall Security group (Public Facing)
+      SecurityGroupIngress:
+        - Description: Allow all traffic
+          IpProtocol: "-1"
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - Description: All TCP
+          IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+        - Description: All UDP
+          IpProtocol: udp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+        - Description: All ICMP
+          IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  #
+  # Store values into SSM Parameter Store
+  #
+  rSsmParameterInspectionVpcTransitGatewayAttachmentId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/inspection-vpc/tgw-attach/id
+      Type: String
+      Value: !Ref rTransitGatewayAttachment
+
+Outputs:
+  oVpcId:
+    Value: !Ref rVpc
+  oPublicSubnetAId:
+    Value: !Ref rPublicSubnetA
+  oPublicSubnetBId:
+    Value: !Ref rPublicSubnetB
+  oPublicRtAId:
+    Value: !Ref rPublicRtA
+  oPublicRtBId:
+    Value: !Ref rPublicRtB
+  oFirewallSubnetAId:
+    Value: !Ref rFirewallSubnetA
+  oFirewallSubnetBId:
+    Value: !Ref rFirewallSubnetB
+  oFirewallRtAId:
+    Value: !Ref rFirewallRtA
+  oFirewallRtBId:
+    Value: !Ref rFirewallRtB
+  oTransitGatewayAttachmentSubnetAId:
+    Value: !Ref rTransitGatewayAttachmentSubnetA
+  oTransitGatewayAttachmentSubnetBId:
+    Value: !Ref rTransitGatewayAttachmentSubnetB
+  oTransitGatewayAttachmentRtAId:
+    Value: !Ref rTransitGatewayAttachmentRtA
+  oTransitGatewayAttachmentRtBId:
+    Value: !Ref rTransitGatewayAttachmentRtB
+  oTransitGatewayAttachmentId:
+    Value: !Ref rTransitGatewayAttachment
+  oNatGatewayAId:
+    Value: !Ref rNatGatewayA
+  oNatGatewayBId:
+    Value: !Ref rNatGatewayB
+  oFirewallSecurityGroupId:
+    Value: !Ref rFirewallSecurityGroup

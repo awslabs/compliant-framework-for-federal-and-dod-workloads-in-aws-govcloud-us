@@ -1,0 +1,820 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Account Vending Machine creation 1`] = `
+Object {
+  "Parameters": Object {
+    "AssetParameters533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2ArtifactHash3904E6C8": Object {
+      "Description": "Artifact hash for asset \\"533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2\\"",
+      "Type": "String",
+    },
+    "AssetParameters533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2S3Bucket3F945790": Object {
+      "Description": "S3 bucket for asset \\"533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2\\"",
+      "Type": "String",
+    },
+    "AssetParameters533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2S3VersionKey700786B2": Object {
+      "Description": "S3 key for asset version \\"533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2\\"",
+      "Type": "String",
+    },
+    "AssetParametersc6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91dArtifactHashBD3AE5B4": Object {
+      "Description": "Artifact hash for asset \\"c6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91d\\"",
+      "Type": "String",
+    },
+    "AssetParametersc6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91dS3BucketA1512276": Object {
+      "Description": "S3 bucket for asset \\"c6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91d\\"",
+      "Type": "String",
+    },
+    "AssetParametersc6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91dS3VersionKeyB7077C97": Object {
+      "Description": "S3 key for asset version \\"c6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91d\\"",
+      "Type": "String",
+    },
+    "AssetParametersdb7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfeArtifactHash40C40D3C": Object {
+      "Description": "Artifact hash for asset \\"db7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfe\\"",
+      "Type": "String",
+    },
+    "AssetParametersdb7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfeS3BucketF37D4EC5": Object {
+      "Description": "S3 bucket for asset \\"db7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfe\\"",
+      "Type": "String",
+    },
+    "AssetParametersdb7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfeS3VersionKeyF7A2084C": Object {
+      "Description": "S3 key for asset version \\"db7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfe\\"",
+      "Type": "String",
+    },
+    "AssetParameterse3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253ArtifactHashDDB35981": Object {
+      "Description": "Artifact hash for asset \\"e3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253\\"",
+      "Type": "String",
+    },
+    "AssetParameterse3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253S3BucketE785C03A": Object {
+      "Description": "S3 bucket for asset \\"e3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253\\"",
+      "Type": "String",
+    },
+    "AssetParameterse3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253S3VersionKeyCADFBC3C": Object {
+      "Description": "S3 key for asset version \\"e3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253\\"",
+      "Type": "String",
+    },
+  },
+  "Resources": Object {
+    "AccountVendingMachineAvmCreateGovCloudAccountFunction76C51DFD": Object {
+      "DependsOn": Array [
+        "AccountVendingMachineAvmCreateGovCloudAccountFunctionServiceRoleDefaultPolicy1207ADBD",
+        "AccountVendingMachineAvmCreateGovCloudAccountFunctionServiceRoleBD9798CC",
+      ],
+      "Metadata": Object {
+        "cfn_nag": Object {
+          "rules_to_suppress": Array [
+            Object {
+              "id": "W58",
+              "reason": "Lambda functions has the required permission to write CloudWatch Logs. It uses custom policy instead of arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole with more tighter permissions.",
+            },
+          ],
+        },
+      },
+      "Properties": Object {
+        "Code": Object {
+          "S3Bucket": Object {
+            "Ref": "AssetParametersc6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91dS3BucketA1512276",
+          },
+          "S3Key": Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                Object {
+                  "Fn::Select": Array [
+                    0,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParametersc6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91dS3VersionKeyB7077C97",
+                        },
+                      ],
+                    },
+                  ],
+                },
+                Object {
+                  "Fn::Select": Array [
+                    1,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParametersc6adad74fe7d545d4548865e1e221de8a515f511506752ab5e8d13d914c7d91dS3VersionKeyB7077C97",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            ],
+          },
+        },
+        "FunctionName": "CompliantFramework-AvmCreateGovCloudAccount",
+        "Handler": "index.lambda_handler",
+        "Role": Object {
+          "Fn::GetAtt": Array [
+            "AccountVendingMachineAvmCreateGovCloudAccountFunctionServiceRoleBD9798CC",
+            "Arn",
+          ],
+        },
+        "Runtime": "python3.8",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AccountVendingMachineAvmCreateGovCloudAccountFunctionServiceRoleBD9798CC": Object {
+      "Properties": Object {
+        "AssumeRolePolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": Object {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": Array [
+          Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                "arn:",
+                Object {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "AccountVendingMachineAvmCreateGovCloudAccountFunctionServiceRoleDefaultPolicy1207ADBD": Object {
+      "Metadata": Object {
+        "cfn_nag": Object {
+          "rules_to_suppress": Array [
+            Object {
+              "id": "W12",
+              "reason": "Lambda permission actions require use of * resource",
+            },
+          ],
+        },
+      },
+      "Properties": Object {
+        "PolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": Array [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": Object {
+                "Fn::Join": Array [
+                  "",
+                  Array [
+                    "arn:",
+                    Object {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:",
+                    Object {
+                      "Ref": "AWS::Region",
+                    },
+                    ":",
+                    Object {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:CompliantFramework-AvmCreateGovCloudAccount",
+                  ],
+                ],
+              },
+            },
+            Object {
+              "Action": Array [
+                "organizations:CreateGovCloudAccount",
+                "organizations:ListAccounts",
+                "organizations:DescribeCreateAccountStatus",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AccountVendingMachineAvmCreateGovCloudAccountFunctionServiceRoleDefaultPolicy1207ADBD",
+        "Roles": Array [
+          Object {
+            "Ref": "AccountVendingMachineAvmCreateGovCloudAccountFunctionServiceRoleBD9798CC",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AccountVendingMachineAvmForGovCloudProductV100CB940AD5": Object {
+      "Properties": Object {
+        "Description": "Creates a new GovCloud account using the CreateGovCloudAccount API. This product requires the creation of AWS CLI Keys for the Central GovCloud account with the proper permissions and stored as /compliant/framework/central-avm/aws-us-gov/access-key-id and /compliant/framework/central-avm/aws-us-gov/secret-access-key into SSM Parameter Store. Please see the implementation guide for more details on setting the IAM permissions",
+        "Distributor": "Compliant Framework",
+        "Name": "Account Vending Machine for AWS GovCloud (US)",
+        "Owner": "Compliant Framework",
+        "ProvisioningArtifactParameters": Array [
+          Object {
+            "Info": Object {
+              "LoadTemplateFromURL": Object {
+                "Fn::Sub": "https://%%BUCKET_NAME%%-\${AWS::Region}.s3.amazonaws.com/%%SOLUTION_NAME%%/%%VERSION%%/compliant-framework-govcloud-account-product-v1.0.0.yml",
+              },
+            },
+            "Name": "v1.0.0",
+          },
+        ],
+      },
+      "Type": "AWS::ServiceCatalog::CloudFormationProduct",
+    },
+    "AccountVendingMachineAvmForGovCloudV100ProductAssociation62529B8B": Object {
+      "Properties": Object {
+        "PortfolioId": Object {
+          "Ref": "AccountVendingMachinePortfolio854DB4D1",
+        },
+        "ProductId": Object {
+          "Ref": "AccountVendingMachineAvmForGovCloudProductV100CB940AD5",
+        },
+      },
+      "Type": "AWS::ServiceCatalog::PortfolioProductAssociation",
+    },
+    "AccountVendingMachineAvmGetOuFunctionAFDB4577": Object {
+      "DependsOn": Array [
+        "AccountVendingMachineAvmGetOuFunctionServiceRoleDefaultPolicy38133BB2",
+        "AccountVendingMachineAvmGetOuFunctionServiceRole50C77B81",
+      ],
+      "Metadata": Object {
+        "cfn_nag": Object {
+          "rules_to_suppress": Array [
+            Object {
+              "id": "W58",
+              "reason": "Lambda functions has the required permission to write CloudWatch Logs. It uses custom policy instead of arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole with more tighter permissions.",
+            },
+          ],
+        },
+      },
+      "Properties": Object {
+        "Code": Object {
+          "S3Bucket": Object {
+            "Ref": "AssetParameters533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2S3Bucket3F945790",
+          },
+          "S3Key": Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                Object {
+                  "Fn::Select": Array [
+                    0,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParameters533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2S3VersionKey700786B2",
+                        },
+                      ],
+                    },
+                  ],
+                },
+                Object {
+                  "Fn::Select": Array [
+                    1,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParameters533cd1850bbeca4f90b86d16347d4c50310784f2fab9ccf73d1885ebc11487d2S3VersionKey700786B2",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            ],
+          },
+        },
+        "FunctionName": "CompliantFramework-AvmGetOu",
+        "Handler": "index.lambda_handler",
+        "Role": Object {
+          "Fn::GetAtt": Array [
+            "AccountVendingMachineAvmGetOuFunctionServiceRole50C77B81",
+            "Arn",
+          ],
+        },
+        "Runtime": "python3.8",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AccountVendingMachineAvmGetOuFunctionServiceRole50C77B81": Object {
+      "Properties": Object {
+        "AssumeRolePolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": Object {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": Array [
+          Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                "arn:",
+                Object {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "AccountVendingMachineAvmGetOuFunctionServiceRoleDefaultPolicy38133BB2": Object {
+      "Properties": Object {
+        "PolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": Array [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": Object {
+                "Fn::Join": Array [
+                  "",
+                  Array [
+                    "arn:",
+                    Object {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:",
+                    Object {
+                      "Ref": "AWS::Region",
+                    },
+                    ":",
+                    Object {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:CompliantFramework-AvmGetOu",
+                  ],
+                ],
+              },
+            },
+            Object {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": Array [
+                Object {
+                  "Fn::Join": Array [
+                    "",
+                    Array [
+                      "arn:",
+                      Object {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:",
+                      Object {
+                        "Ref": "AWS::Region",
+                      },
+                      ":",
+                      Object {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":parameter/compliant/framework/central-avm/aws-us-gov/access-key-id",
+                    ],
+                  ],
+                },
+                Object {
+                  "Fn::Join": Array [
+                    "",
+                    Array [
+                      "arn:",
+                      Object {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:",
+                      Object {
+                        "Ref": "AWS::Region",
+                      },
+                      ":",
+                      Object {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":parameter/compliant/framework/central-avm/aws-us-gov/secret-access-key",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AccountVendingMachineAvmGetOuFunctionServiceRoleDefaultPolicy38133BB2",
+        "Roles": Array [
+          Object {
+            "Ref": "AccountVendingMachineAvmGetOuFunctionServiceRole50C77B81",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AccountVendingMachineAvmInviteGovCloudAccountFunction79216E43": Object {
+      "DependsOn": Array [
+        "AccountVendingMachineAvmInviteGovCloudAccountFunctionServiceRoleDefaultPolicy8D4E1BEF",
+        "AccountVendingMachineAvmInviteGovCloudAccountFunctionServiceRole36AE2041",
+      ],
+      "Metadata": Object {
+        "cfn_nag": Object {
+          "rules_to_suppress": Array [
+            Object {
+              "id": "W58",
+              "reason": "Lambda functions has the required permission to write CloudWatch Logs. It uses custom policy instead of arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole with more tighter permissions.",
+            },
+          ],
+        },
+      },
+      "Properties": Object {
+        "Code": Object {
+          "S3Bucket": Object {
+            "Ref": "AssetParameterse3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253S3BucketE785C03A",
+          },
+          "S3Key": Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                Object {
+                  "Fn::Select": Array [
+                    0,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParameterse3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253S3VersionKeyCADFBC3C",
+                        },
+                      ],
+                    },
+                  ],
+                },
+                Object {
+                  "Fn::Select": Array [
+                    1,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParameterse3aefa62a1fc855c0294151c504d52f25d27ea36af85de4b4841edc726ac0253S3VersionKeyCADFBC3C",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            ],
+          },
+        },
+        "FunctionName": "CompliantFramework-AvmInviteGovCloudAccount",
+        "Handler": "index.lambda_handler",
+        "Role": Object {
+          "Fn::GetAtt": Array [
+            "AccountVendingMachineAvmInviteGovCloudAccountFunctionServiceRole36AE2041",
+            "Arn",
+          ],
+        },
+        "Runtime": "python3.8",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AccountVendingMachineAvmInviteGovCloudAccountFunctionServiceRole36AE2041": Object {
+      "Properties": Object {
+        "AssumeRolePolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": Object {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": Array [
+          Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                "arn:",
+                Object {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "AccountVendingMachineAvmInviteGovCloudAccountFunctionServiceRoleDefaultPolicy8D4E1BEF": Object {
+      "Properties": Object {
+        "PolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": Array [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": Object {
+                "Fn::Join": Array [
+                  "",
+                  Array [
+                    "arn:",
+                    Object {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:",
+                    Object {
+                      "Ref": "AWS::Region",
+                    },
+                    ":",
+                    Object {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:CompliantFramework-AvmInviteGovCloudAccount",
+                  ],
+                ],
+              },
+            },
+            Object {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": Array [
+                Object {
+                  "Fn::Join": Array [
+                    "",
+                    Array [
+                      "arn:",
+                      Object {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:",
+                      Object {
+                        "Ref": "AWS::Region",
+                      },
+                      ":",
+                      Object {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":parameter/compliant/framework/central-avm/aws-us-gov/access-key-id",
+                    ],
+                  ],
+                },
+                Object {
+                  "Fn::Join": Array [
+                    "",
+                    Array [
+                      "arn:",
+                      Object {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:",
+                      Object {
+                        "Ref": "AWS::Region",
+                      },
+                      ":",
+                      Object {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":parameter/compliant/framework/central-avm/aws-us-gov/secret-access-key",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AccountVendingMachineAvmInviteGovCloudAccountFunctionServiceRoleDefaultPolicy8D4E1BEF",
+        "Roles": Array [
+          Object {
+            "Ref": "AccountVendingMachineAvmInviteGovCloudAccountFunctionServiceRole36AE2041",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AccountVendingMachineAvmMoveAccountFunctionC2DAD196": Object {
+      "DependsOn": Array [
+        "AccountVendingMachineAvmMoveAccountFunctionServiceRoleDefaultPolicy9FDDA308",
+        "AccountVendingMachineAvmMoveAccountFunctionServiceRole0AC3DCCA",
+      ],
+      "Metadata": Object {
+        "cfn_nag": Object {
+          "rules_to_suppress": Array [
+            Object {
+              "id": "W58",
+              "reason": "Lambda functions has the required permission to write CloudWatch Logs. It uses custom policy instead of arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole with more tighter permissions.",
+            },
+          ],
+        },
+      },
+      "Properties": Object {
+        "Code": Object {
+          "S3Bucket": Object {
+            "Ref": "AssetParametersdb7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfeS3BucketF37D4EC5",
+          },
+          "S3Key": Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                Object {
+                  "Fn::Select": Array [
+                    0,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParametersdb7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfeS3VersionKeyF7A2084C",
+                        },
+                      ],
+                    },
+                  ],
+                },
+                Object {
+                  "Fn::Select": Array [
+                    1,
+                    Object {
+                      "Fn::Split": Array [
+                        "||",
+                        Object {
+                          "Ref": "AssetParametersdb7c97b8d82bc85a44cb7c0cb5234ecd1e4f92260592956b9b066919d5303cfeS3VersionKeyF7A2084C",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            ],
+          },
+        },
+        "FunctionName": "CompliantFramework-AvmMoveAccount",
+        "Handler": "index.lambda_handler",
+        "Role": Object {
+          "Fn::GetAtt": Array [
+            "AccountVendingMachineAvmMoveAccountFunctionServiceRole0AC3DCCA",
+            "Arn",
+          ],
+        },
+        "Runtime": "python3.8",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AccountVendingMachineAvmMoveAccountFunctionServiceRole0AC3DCCA": Object {
+      "Properties": Object {
+        "AssumeRolePolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": Object {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": Array [
+          Object {
+            "Fn::Join": Array [
+              "",
+              Array [
+                "arn:",
+                Object {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "AccountVendingMachineAvmMoveAccountFunctionServiceRoleDefaultPolicy9FDDA308": Object {
+      "Properties": Object {
+        "PolicyDocument": Object {
+          "Statement": Array [
+            Object {
+              "Action": Array [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": Object {
+                "Fn::Join": Array [
+                  "",
+                  Array [
+                    "arn:",
+                    Object {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":logs:",
+                    Object {
+                      "Ref": "AWS::Region",
+                    },
+                    ":",
+                    Object {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":log-group:CompliantFramework-AvmMoveAccount",
+                  ],
+                ],
+              },
+            },
+            Object {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": Array [
+                Object {
+                  "Fn::Join": Array [
+                    "",
+                    Array [
+                      "arn:",
+                      Object {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:",
+                      Object {
+                        "Ref": "AWS::Region",
+                      },
+                      ":",
+                      Object {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":parameter/compliant/framework/central-avm/aws-us-gov/access-key-id",
+                    ],
+                  ],
+                },
+                Object {
+                  "Fn::Join": Array [
+                    "",
+                    Array [
+                      "arn:",
+                      Object {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:",
+                      Object {
+                        "Ref": "AWS::Region",
+                      },
+                      ":",
+                      Object {
+                        "Ref": "AWS::AccountId",
+                      },
+                      ":parameter/compliant/framework/central-avm/aws-us-gov/secret-access-key",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AccountVendingMachineAvmMoveAccountFunctionServiceRoleDefaultPolicy9FDDA308",
+        "Roles": Array [
+          Object {
+            "Ref": "AccountVendingMachineAvmMoveAccountFunctionServiceRole0AC3DCCA",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "AccountVendingMachinePortfolio854DB4D1": Object {
+      "Properties": Object {
+        "DisplayName": "Compliant Framework - Tenant Services",
+        "ProviderName": "Compliant Framework",
+      },
+      "Type": "AWS::ServiceCatalog::Portfolio",
+    },
+  },
+}
+`;

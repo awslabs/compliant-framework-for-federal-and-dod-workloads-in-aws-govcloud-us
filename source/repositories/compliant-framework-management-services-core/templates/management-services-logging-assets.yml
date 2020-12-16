@@ -1,0 +1,505 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pPrincipalOrgId:
+    Type: String
+  pLoggingAccountId:
+    Type: String
+  pConsolidatedLogsS3BucketCmkArn:
+    Type: String
+  pPrimaryRegion:
+    Type: String
+
+Resources:
+  rLoggingS3BucketCmk:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Logging - S3 CMK
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-policy-1
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:CancelKeyDeletion
+              - kms:CreateAlias
+              - kms:CreateGrant
+              - kms:CreateKey
+              - kms:DeleteAlias
+              - kms:DeleteImportedKeyMaterial
+              - kms:DescribeKey
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:EnableKey
+              - kms:EnableKeyRotation
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GenerateRandom
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:GetParametersForImport
+              - kms:ImportKeyMaterial
+              - kms:ListAliases
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListKeys
+              - kms:ListResourceTags
+              - kms:ListRetirableGrants
+              - kms:PutKeyPolicy
+              - kms:RetireGrant
+              - kms:RevokeGrant
+              - kms:ScheduleKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - kms:UpdateKeyDescription
+            Resource: "*"
+          - Sid: Allow Account root use of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GenerateRandom
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListAliases
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListKeys
+              - kms:ListResourceTags
+              - kms:ListRetirableGrants
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+          - Sid: Allow S3 service use of the key
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GenerateRandom
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListAliases
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListKeys
+              - kms:ListResourceTags
+              - kms:ListRetirableGrants
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+          - Sid: Allow VPC Flow Logs use of the key
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyPair
+              - kms:GenerateDataKeyPairWithoutPlaintext
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+          - Sid: Allow CloudTrail use of the key
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyPair
+              - kms:GenerateDataKeyPairWithoutPlaintext
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+          - Sid: Allow Organization use of the key
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyPair
+              - kms:GenerateDataKeyPairWithoutPlaintext
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref pPrincipalOrgId
+
+  rSsmParameterLoggingS3BucketCmk:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/management-services/logging-bucket-cmk/arn
+      Type: String
+      Value: !GetAtt rLoggingS3BucketCmk.Arn
+
+  rLoggingS3BucketCmkAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/compliant-framework/logging/s3
+      TargetKeyId: !Ref rLoggingS3BucketCmk
+
+  rCloudtrailS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ConsolidatedLogsReplicationRole
+        Rules:
+          - Destination:
+              Bucket: !Sub arn:${AWS::Partition}:s3:::consolidated-logs-${pLoggingAccountId}-${pPrimaryRegion}
+              EncryptionConfiguration:
+                ReplicaKmsKeyID: !Ref pConsolidatedLogsS3BucketCmkArn
+              StorageClass: STANDARD_IA
+              AccessControlTranslation:
+                Owner: Destination
+              Account: !Ref pLoggingAccountId
+            SourceSelectionCriteria:
+              SseKmsEncryptedObjects:
+                Status: Enabled
+            Id: ConsolidatedLogs
+            Prefix: ""
+            Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:${rLoggingS3BucketCmkAlias}
+              SSEAlgorithm: aws:kms
+      BucketName: !Sub cloudtrail-${AWS::AccountId}-${AWS::Region}
+
+  rCloudtrailS3BucketPolicy:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F16
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref rCloudtrailS3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Action:
+              - s3:*
+            Principal: "*"
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rCloudtrailS3Bucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: AWSLogDeliveryWrite
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Principal:
+              Service:
+                - cloudtrail.amazonaws.com
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rCloudtrailS3Bucket}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: AWSLogDeliveryAclCheck
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+            Principal:
+              Service:
+                - cloudtrail.amazonaws.com
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rCloudtrailS3Bucket}
+
+  rConfigS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ConsolidatedLogsReplicationRole
+        Rules:
+          - Destination:
+              Bucket: !Sub arn:${AWS::Partition}:s3:::consolidated-logs-${pLoggingAccountId}-${pPrimaryRegion}
+              EncryptionConfiguration:
+                ReplicaKmsKeyID: !Ref pConsolidatedLogsS3BucketCmkArn
+              StorageClass: STANDARD_IA
+              AccessControlTranslation:
+                Owner: Destination
+              Account: !Ref pLoggingAccountId
+            SourceSelectionCriteria:
+              SseKmsEncryptedObjects:
+                Status: Enabled
+            Id: ConsolidatedLogs
+            Prefix: ""
+            Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:${rLoggingS3BucketCmkAlias}
+              SSEAlgorithm: aws:kms
+      BucketName: !Sub config-${AWS::AccountId}-${AWS::Region}
+
+  rConfigS3BucketPolicy:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F16
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref rConfigS3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Action:
+              - s3:*
+            Principal: "*"
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rConfigS3Bucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: AWSLogDeliveryWrite
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Principal:
+              Service:
+                - config.amazonaws.com
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rConfigS3Bucket}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: AWSLogDeliveryAclCheck
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+            Principal:
+              Service:
+                - config.amazonaws.com
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rConfigS3Bucket}
+          - Sid: AWSConfigBucketExistenceCheck
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Principal:
+              Service:
+                - config.amazonaws.com
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rConfigS3Bucket}
+
+  rFlowLogsS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ConsolidatedLogsReplicationRole
+        Rules:
+          - Destination:
+              Bucket: !Sub arn:${AWS::Partition}:s3:::consolidated-logs-${pLoggingAccountId}-${pPrimaryRegion}
+              EncryptionConfiguration:
+                ReplicaKmsKeyID: !Ref pConsolidatedLogsS3BucketCmkArn
+              StorageClass: STANDARD_IA
+              AccessControlTranslation:
+                Owner: Destination
+              Account: !Ref pLoggingAccountId
+            SourceSelectionCriteria:
+              SseKmsEncryptedObjects:
+                Status: Enabled
+            Id: ConsolidatedLogs
+            Prefix: ""
+            Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:${rLoggingS3BucketCmkAlias}
+              SSEAlgorithm: aws:kms
+      BucketName: !Sub flow-logs-${AWS::AccountId}-${AWS::Region}
+
+  rFlowLogsS3BucketPolicy:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F16
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref rFlowLogsS3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AWSLogDeliveryWrite
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Principal:
+              Service:
+                - delivery.logs.amazonaws.com
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rFlowLogsS3Bucket}/AWSLogs/*/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: AWSLogDeliveryAclCheck
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+            Principal:
+              Service:
+                - delivery.logs.amazonaws.com
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rFlowLogsS3Bucket}
+
+  #
+  # Consolidated logging support (for cross account copy)
+  #
+  rConsolidatedLogsReplicationRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ConsolidatedLogsReplicationRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: AllowReplicationAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetReplicationConfiguration
+                  - s3:GetObjectVersionForReplication
+                  - s3:GetObjectVersionAcl
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${rCloudtrailS3Bucket}
+                  - !Sub arn:${AWS::Partition}:s3:::${rCloudtrailS3Bucket}/*
+                  - !Sub arn:${AWS::Partition}:s3:::${rConfigS3Bucket}
+                  - !Sub arn:${AWS::Partition}:s3:::${rConfigS3Bucket}/*
+                  - !Sub arn:${AWS::Partition}:s3:::${rFlowLogsS3Bucket}
+                  - !Sub arn:${AWS::Partition}:s3:::${rFlowLogsS3Bucket}/*
+              - Effect: Allow
+                Action:
+                  - s3:ReplicateObject
+                  - s3:ReplicateDelete
+                  - s3:ReplicateTags
+                  - s3:GetObjectVersionTagging
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::consolidated-logs-${pLoggingAccountId}-${pPrimaryRegion}/*
+                Condition:
+                  StringLikeIfExists:
+                    s3:x-amz-server-side-encryption:
+                      - aws:kms
+                      - AES256
+                    s3:x-amz-server-side-encryption-aws-kms-key-id:
+                      - !Ref pConsolidatedLogsS3BucketCmkArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource:
+                  - !GetAtt rLoggingS3BucketCmk.Arn
+                Condition:
+                  StringLike:
+                    kms:ViaService: !Sub s3.${pPrimaryRegion}.amazonaws.com
+                    kms:EncryptionContext:aws:s3:arn:
+                      - !Sub arn:${AWS::Partition}:s3:::${rCloudtrailS3Bucket}/*
+                      - !Sub arn:${AWS::Partition}:s3:::${rConfigS3Bucket}/*
+                      - !Sub arn:${AWS::Partition}:s3:::${rFlowLogsS3Bucket}/*
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                Resource:
+                  - !Ref pConsolidatedLogsS3BucketCmkArn
+                Condition:
+                  StringLike:
+                    kms:ViaService: !Sub s3.${pPrimaryRegion}.amazonaws.com
+                    kms:EncryptionContext:aws:s3:arn:
+                      - !Sub arn:${AWS::Partition}:s3:::consolidated-logs-${pLoggingAccountId}-${pPrimaryRegion}/*

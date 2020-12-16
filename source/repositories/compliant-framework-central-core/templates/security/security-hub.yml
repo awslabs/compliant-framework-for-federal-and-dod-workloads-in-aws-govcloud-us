@@ -1,0 +1,701 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pCentralAccountId:
+    Type: String
+
+  pNotificationsEmail:
+    Type: String
+
+  pCloudTrailCloudWatchLogGroupName:
+    Type: String
+
+  pPrimaryRegion:
+    Type: String
+
+Conditions:
+  cIsPrimaryRegion: !Equals [!Ref AWS::Region, !Ref pPrimaryRegion]
+  cCreateSecurityHubAccessRole: !And
+    - !Condition cIsPrimaryRegion
+    - !Not [!Equals [!Ref AWS::AccountId, !Ref pCentralAccountId]]
+
+Resources:
+  #
+  # Security Hub
+  #
+  rSecurityHub:
+    DependsOn:
+      - rSecurityHubAlarmNotificationTopic
+    Type: AWS::SecurityHub::Hub
+
+  # Cross account access role to accept invites
+  rSecurityHubAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+          - id: W28
+    Condition: cCreateSecurityHubAccessRole
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SecurityHubAccessRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub ${pCentralAccountId}
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: security-hub-accept-invite
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - securityhub:AcceptInvitation
+                  - securityhub:ListInvitations
+                Resource: "*"
+
+  rConfigureIamPolicyRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+    Condition: cIsPrimaryRegion
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: cloudwatch-logs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*"
+        - PolicyName: iam-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:DeleteAccountPasswordPolicy
+                  - iam:UpdateAccountPasswordPolicy
+                Resource: "*"
+
+  rConfigureIamPolicyFunction:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import string
+          import cfnresponse
+          import boto3
+          from botocore.exceptions import ClientError
+          def handler(event, context):
+            print('event:')
+            print(json.dumps(event, indent=2, default=str))
+            iam_client = boto3.client('iam')
+            if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+              try:
+                response = iam_client.update_account_password_policy(
+                    MinimumPasswordLength=14,
+                    RequireSymbols=True,
+                    RequireNumbers=True,
+                    RequireUppercaseCharacters=True,
+                    RequireLowercaseCharacters=True,
+                    AllowUsersToChangePassword=True,
+                    MaxPasswordAge=90,
+                    PasswordReusePrevention=24,
+                    HardExpiry=True
+                )
+                print(json.dumps(response, indent=2, default=str))
+                cfnresponse.send(
+                  event, context, cfnresponse.SUCCESS, {})
+              except ClientError as ex:
+                print(ex)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})
+            elif event['RequestType'] == 'Delete':
+              try:
+                response = iam_client.delete_account_password_policy()
+              except ClientError as ex:
+                print(ex)
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            else:
+              cfnresponse.send(event, context, cfnresponse.FAILED, {})
+            return {}
+      Handler: index.handler
+      Runtime: python3.8
+      Timeout: 90
+      Role: !GetAtt rConfigureIamPolicyRole.Arn
+
+  rConfigureIamPolicy:
+    Condition: cIsPrimaryRegion
+    Type: Custom::ConfigureIamPolicy
+    Properties:
+      ServiceToken: !GetAtt rConfigureIamPolicyFunction.Arn
+
+  rSecurityHubAlarmNotificationTopicCmk:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Logging - S3 CMK
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-policy-1
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:ListGrants
+              - kms:GenerateRandom
+              - kms:TagResource
+              - kms:CreateAlias
+              - kms:ListKeyPolicies
+              - kms:ListResourceTags
+              - kms:CreateGrant
+              - kms:RevokeGrant
+              - kms:GetKeyPolicy
+              - kms:ListKeys
+              - kms:ListRetirableGrants
+              - kms:PutKeyPolicy
+              - kms:ListAliases
+              - kms:CancelKeyDeletion
+              - kms:DisableKey
+              - kms:DeleteAlias
+              - kms:DescribeKey
+              - kms:ImportKeyMaterial
+              - kms:UpdateKeyDescription
+              - kms:GetKeyRotationStatus
+              - kms:DeleteImportedKeyMaterial
+              - kms:DisableKeyRotation
+              - kms:UpdateAlias
+              - kms:UntagResource
+              - kms:RetireGrant
+              - kms:EnableKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:EnableKeyRotation
+              - kms:ScheduleKeyDeletion
+              - kms:GetParametersForImport
+              - kms:CreateKey
+            Resource: "*"
+          - Sid: Allow Cloudtrail use of the key
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyPair
+              - kms:GenerateDataKeyPairWithoutPlaintext
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+  rSecurityHubAlarmNotificationTopicCmkAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/compliant-framework/security-hub/sns
+      TargetKeyId: !Ref rSecurityHubAlarmNotificationTopicCmk
+
+  # CIS AWS Foundation Benchmark Topics
+  rSecurityHubAlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: SecurityHub-CIS-Alarms
+      KmsMasterKeyId: !Ref rSecurityHubAlarmNotificationTopicCmkAlias
+      Subscription:
+        - Endpoint: !Ref pNotificationsEmail
+          Protocol: email
+  # 1.1 – Avoid the use of the "root" account
+  rSecurityHubRootAccountMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: '{$.userIdentity.type="Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType !="AwsServiceEvent"}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: RootAccount
+          MetricValue: "1"
+  rSecurityHubRootAccountAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-1.1-RootAccountUsage
+      AlarmDescription: Alarm for usage of "root" account
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: RootAccountUsage
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.3 – Ensure a log metric filter and alarm exist for usage of "root" account
+  rSecurityHubRootAccountUsageMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: '{$.userIdentity.type="Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType !="AwsServiceEvent"}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: RootAccountUsage
+          MetricValue: "1"
+  rSecurityHubRootAccountUsageAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.3-RootAccountUsage
+      AlarmDescription: Alarm for usage of "root" account
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: RootAccountUsage
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.1 – Ensure a log metric filter and alarm exist for unauthorized API calls
+  rSecurityHubUnauthorizedAPICallsMetricFilter:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::Logs::MetricFilter
+    Condition: cIsPrimaryRegion
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: '{($.errorCode="*UnauthorizedOperation") || ($.errorCode="AccessDenied*")}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: UnauthorizedAPICalls
+          MetricValue: "1"
+  rSecurityHubUnauthorizedAPICallsAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.1-UnauthorizedAPICalls
+      AlarmDescription: Alarm for unauthorized API calls
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: UnauthorizedAPICalls
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.2 – Ensure a log metric filter and alarm exist for AWS Management Console sign-in without MFA
+  rSecurityHubConsoleSigninWithoutMFAMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: '{($.eventName="ConsoleLogin") && ($.additionalEventData.MFAUsed !="Yes")}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: ConsoleSigninWithoutMFA
+          MetricValue: "1"
+  rSecurityHubConsoleSigninWithoutMFAAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.2-ConsoleSigninWithoutMFA
+      AlarmDescription: Alarm for AWS Management Console sign-in without MFA
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: ConsoleSigninWithoutMFA
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.4 – Ensure a log metric filter and alarm exist for IAM policy changes
+  rSecurityHubIAMPolicyChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventName=DeleteGroupPolicy) || ($.eventName=DeleteRolePolicy) || ($.eventName=DeleteUserPolicy) || ($.eventName=PutGroupPolicy) || ($.eventName=PutRolePolicy) || ($.eventName=PutUserPolicy) || ($.eventName=CreatePolicy) || ($.eventName=DeletePolicy) || ($.eventName=CreatePolicyVersion) || ($.eventName=DeletePolicyVersion) || ($.eventName=AttachRolePolicy) || ($.eventName=DetachRolePolicy) || ($.eventName=AttachUserPolicy) || ($.eventName=DetachUserPolicy) || ($.eventName=AttachGroupPolicy) || ($.eventName=DetachGroupPolicy)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: IAMPolicyChanges
+          MetricValue: "1"
+  rSecurityHubIAMPolicyChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.4-IAMPolicyChanges
+      AlarmDescription: Alarm for IAM policy changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: IAMPolicyChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.5 – Ensure a log metric filter and alarm exist for CloudTrail configuration changes
+  rSecurityHubCloudTrailChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventName=CreateTrail) || ($.eventName=UpdateTrail) || ($.eventName=DeleteTrail) || ($.eventName=StartLogging) || ($.eventName=StopLogging)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: CloudTrailChanges
+          MetricValue: "1"
+  rSecurityHubCloudTrailChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.5-CloudTrailChanges
+      AlarmDescription: Alarm for CloudTrail configuration changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: CloudTrailChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.6 – Ensure a log metric filter and alarm exist for AWS Management Console authentication failures
+  rSecurityHubConsoleAuthenticationFailureMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: '{($.eventName=ConsoleLogin) && ($.errorMessage="Failed authentication")}'
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: ConsoleAuthenticationFailure
+          MetricValue: "1"
+  rSecurityHubConsoleAuthenticationFailureAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.6-ConsoleAuthenticationFailure
+      AlarmDescription: Alarm exist for AWS Management Console authentication failures
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: ConsoleAuthenticationFailure
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.7 – Ensure a log metric filter and alarm exist for disabling or scheduled deletion of customer created CMKs
+  rSecurityHubDisableOrDeleteCMKMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventSource=kms.amazonaws.com) && (($.eventName=DisableKey) || ($.eventName=ScheduleKeyDeletion))}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: DisableOrDeleteCMK
+          MetricValue: "1"
+  rSecurityHubDisableOrDeleteCMKAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.7-DisableOrDeleteCMK
+      AlarmDescription: Alarm for disabling or scheduled deletion of customer created CMKs
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: DisableOrDeleteCMK
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.8 – Ensure a log metric filter and alarm exist for S3 bucket policy changes
+  rSecurityHubS3BucketPolicyChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventSource=s3.amazonaws.com) && (($.eventName=PutBucketAcl) || ($.eventName=PutBucketPolicy) || ($.eventName=PutBucketCors) || ($.eventName=PutBucketLifecycle) || ($.eventName=PutBucketReplication) || ($.eventName=DeleteBucketPolicy) || ($.eventName=DeleteBucketCors) || ($.eventName=DeleteBucketLifecycle) || ($.eventName=DeleteBucketReplication))}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: S3BucketPolicyChanges
+          MetricValue: "1"
+  rSecurityHubS3BucketPolicyChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.8-S3BucketPolicyChanges.
+      AlarmDescription: Alarm for S3 bucket policy changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: S3BucketPolicyChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.9 – Ensure a log metric filter and alarm exist for AWS Config configuration changes
+  rSecurityHubAWSConfigChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventSource=config.amazonaws.com) && (($.eventName=StopConfigurationRecorder) || ($.eventName=DeleteDeliveryChannel) || ($.eventName=PutDeliveryChannel) || ($.eventName=PutConfigurationRecorder))}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: AWSConfigChanges
+          MetricValue: "1"
+  rSecurityHubAWSConfigChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.9-AWSConfigChanges
+      AlarmDescription: Alarm for AWS Config configuration changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: AWSConfigChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.10 – Ensure a log metric filter and alarm exist for security group changes
+  rSecurityHubSecurityGroupChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventName=AuthorizeSecurityGroupIngress) || ($.eventName=AuthorizeSecurityGroupEgress) || ($.eventName=RevokeSecurityGroupIngress) || ($.eventName=RevokeSecurityGroupEgress) || ($.eventName=CreateSecurityGroup) || ($.eventName=DeleteSecurityGroup)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: SecurityGroupChanges
+          MetricValue: "1"
+  rSecurityGroupChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.10-SecurityGroupChanges
+      AlarmDescription: Alarm for security group changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: SecurityGroupChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.11 – Ensure a log metric filter and alarm exist for changes to Network Access Control Lists (NACL)
+  rSecurityHubNetworkACLChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventName=CreateNetworkAcl) || ($.eventName=CreateNetworkAclEntry) || ($.eventName=DeleteNetworkAcl) || ($.eventName=DeleteNetworkAclEntry) || ($.eventName=ReplaceNetworkAclEntry) || ($.eventName=ReplaceNetworkAclAssociation)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: NetworkACLChanges
+          MetricValue: "1"
+  rSecurityHubNetworkACLChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.11-NetworkACLChanges
+      AlarmDescription: Alarm for changes to Network Access Control Lists (NACL)
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: NetworkACLChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.12 – Ensure a log metric filter and alarm exist for changes to network gateways
+  rSecurityHubNetworkGatewayChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventName=CreateCustomerGateway) || ($.eventName=DeleteCustomerGateway) || ($.eventName=AttachInternetGateway) || ($.eventName=CreateInternetGateway) || ($.eventName=DeleteInternetGateway) || ($.eventName=DetachInternetGateway)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: NetworkGatewayChanges
+          MetricValue: "1"
+  rSecurityHubNetworkGatewayChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.12-NetworkGatewayChanges
+      AlarmDescription: Alarm for changes to network gateways
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: NetworkGatewayChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.13 – Ensure a log metric filter and alarm exist for route table changes
+  rSecurityHubRouteTableChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventName=CreateRoute) || ($.eventName=CreateRouteTable) || ($.eventName=ReplaceRoute) || ($.eventName=ReplaceRouteTableAssociation) || ($.eventName=DeleteRouteTable) || ($.eventName=DeleteRoute) || ($.eventName=DisassociateRouteTable)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: RouteTableChanges
+          MetricValue: "1"
+  rRouteTableChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.13-RouteTableChanges
+      AlarmDescription: Alarm for route table changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: RouteTableChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching
+  # 3.14 – Ensure a log metric filter and alarm exist for VPC changes
+  rSecurityHubVPCChangesMetricFilter:
+    Condition: cIsPrimaryRegion
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref pCloudTrailCloudWatchLogGroupName
+      FilterPattern: "{($.eventName=CreateVpc) || ($.eventName=DeleteVpc) || ($.eventName=ModifyVpcAttribute) || ($.eventName=AcceptVpcPeeringConnection) || ($.eventName=CreateVpcPeeringConnection) || ($.eventName=DeleteVpcPeeringConnection) || ($.eventName=RejectVpcPeeringConnection) || ($.eventName=AttachClassicLinkVpc) || ($.eventName=DetachClassicLinkVpc) || ($.eventName=DisableVpcClassicLink) || ($.eventName=EnableVpcClassicLink)}"
+      MetricTransformations:
+        - MetricNamespace: LogMetrics
+          MetricName: VPCChanges
+          MetricValue: "1"
+  rSecurityHubVPCChangesAlarm:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Resource found with an explicit name
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-3.14-VPCChanges
+      AlarmDescription: Alarm for VPC changes
+      AlarmActions:
+        - !Ref rSecurityHubAlarmNotificationTopic
+      MetricName: VPCChanges
+      Namespace: LogMetrics
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+      Threshold: 1
+      TreatMissingData: notBreaching

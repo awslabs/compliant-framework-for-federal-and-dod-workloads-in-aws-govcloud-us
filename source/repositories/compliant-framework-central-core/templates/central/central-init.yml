@@ -1,0 +1,163 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pSolutionInfoBuiltBy:
+    Type: String
+    Default: wwps-proserve-us-dod
+  pSolutionInfoName:
+    Type: String
+    Default: compliant-framework-for-federal-and-dod-workloads-in-aws-govcloud-us
+  pSolutionInfoVersion:
+    Type: String
+  pS3Bucket:
+    Type: String
+  pS3Region:
+    Type: String
+  pRepo:
+    Type: String
+
+  pLoggingAccountId:
+    Type: String
+  pPrimaryRegion:
+    Type: String
+
+  pNotificationsEmail:
+    Type: String
+  pConsolidatedLogsS3BucketCmkArn:
+    Type: String
+
+Conditions:
+  cIsPrimaryRegion: !Equals [!Ref AWS::Region, !Ref pPrimaryRegion]
+
+Resources:
+  rSsmParameterConsolidatedLogsS3BucketCmkArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/consolidated-logs/cmk/arn
+      Type: String
+      Value: !Ref pConsolidatedLogsS3BucketCmkArn
+
+  #
+  # CloudTrail
+  #
+  rCloudTrailStack:
+    Condition: cIsPrimaryRegion
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pLoggingAccountId: !Ref pLoggingAccountId
+      Tags:
+        - Key: Environment
+          Value: core
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/security/security-cloudtrail.yml
+
+  #
+  # Config
+  #
+  rConfigStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pCentralAccountId: !Ref AWS::AccountId
+        pLoggingAccountId: !Ref pLoggingAccountId
+        pPrimaryRegion: !Ref pPrimaryRegion
+      Tags:
+        - Key: Environment
+          Value: core
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/security/security-config.yml
+
+  #
+  # Security Hub
+  #
+  rSecurityHubStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pCentralAccountId: !Sub ${AWS::AccountId}
+        pNotificationsEmail: !Sub ${pNotificationsEmail}
+        pCloudTrailCloudWatchLogGroupName:
+          !If [
+            cIsPrimaryRegion,
+            !GetAtt rCloudTrailStack.Outputs.oCloudTrailCloudWatchLogGroupName,
+            "",
+          ]
+        pPrimaryRegion: !Ref pPrimaryRegion
+      Tags:
+        - Key: Environment
+          Value: core
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/security/security-hub.yml
+
+  #
+  # Guard Duty
+  #
+  rGuardDutyStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Tags:
+        - Key: Environment
+          Value: core
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/security/security-guard-duty.yml
+
+  #
+  # IAM Groups (non-Federated)
+  #
+  rIamGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Tags:
+        - Key: Environment
+          Value: core
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/security/security-iam-groups.yml

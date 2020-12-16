@@ -1,0 +1,73 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pLoggingAccountId:
+    Type: String
+
+Resources:
+  #
+  # AWS CloudTrail
+  #
+  rCloudTrailCloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 365
+  rCloudTrailCloudWatchLogGroupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: allow-access-to-cw-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${rCloudTrailCloudWatchLogGroup}:log-stream:${AWS::AccountId}*
+  rCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      CloudWatchLogsLogGroupArn: !GetAtt rCloudTrailCloudWatchLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt rCloudTrailCloudWatchLogGroupRole.Arn
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+      IsMultiRegionTrail: true
+      S3BucketName: !Sub cloudtrail-${pLoggingAccountId}-${AWS::Region}
+      EventSelectors:
+        - IncludeManagementEvents: true
+          DataResources:
+            - Values:
+                - !Sub "arn:${AWS::Partition}:s3:::"
+              Type: AWS::S3::Object
+            - Values:
+                - !Sub "arn:${AWS::Partition}:lambda"
+              Type: AWS::Lambda::Function
+          ReadWriteType: All
+      KMSKeyId: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${pLoggingAccountId}:alias/compliant-framework/logging/s3
+
+Outputs:
+  oCloudTrailCloudWatchLogGroupName:
+    Value: !Ref rCloudTrailCloudWatchLogGroup

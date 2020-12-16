@@ -1,0 +1,158 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Tenant Account Information
+        Parameters:
+          - pTenantAccountId
+      - Label:
+          default: VPC Information
+        Parameters:
+          - pTenantVpcPrefix
+          - pTenantVpcCidrBlock
+          - pTenantVpcTenancy
+          - pTenantVpcApplicationSubnetACidrBlock
+          - pTenantVpcApplicationSubnetBCidrBlock
+          - pTenantVpcDataSubnetACidrBlock
+          - pTenantVpcDataSubnetBCidrBlock
+          - pTenantVpcTransitGatewayAttachmentSubnetACidrBlock
+          - pTenantVpcTransitGatewayAttachmentSubnetBCidrBlock
+      - Label:
+          default: Transit Account Information
+        Parameters:
+          - pTransitAccountId
+          - pTransitGatewayId
+      - Label:
+          default: Environment Parameters (SSM)
+        Parameters:
+          - pS3Bucket
+          - pS3Region
+    ParameterLabels:
+      pTenantAccountId:
+        default: Account Id
+      pS3Bucket:
+        default: S3 Environment Pipeline Bucket Name
+      pS3Region:
+        default: S3 Bucket Region
+      pTenantVpcPrefix:
+        default: VPC Name Prefix
+      pTenantVpcCidrBlock:
+        default: VPC CIDR
+      pTenantVpcTenancy:
+        default: Instance Tenancy
+      pTenantVpcApplicationSubnetACidrBlock:
+        default: Application Subnet A CIDR
+      pTenantVpcApplicationSubnetBCidrBlock:
+        default: Application Subnet B CIDR
+      pTenantVpcDataSubnetACidrBlock:
+        default: Data Subnet A CIDR
+      pTenantVpcDataSubnetBCidrBlock:
+        default: Data Subnet B CIDR
+      pTenantVpcTransitGatewayAttachmentSubnetACidrBlock:
+        default: Transit Gateway Attachment Subnet A CIDR
+      pTenantVpcTransitGatewayAttachmentSubnetBCidrBlock:
+        default: Transit Gateway Attachment Subnet B CIDR
+      pTransitGatewayId:
+        default: Transit Gateway ID
+      pTransitAccountId:
+        default: Transit Account ID
+
+Parameters:
+  pTenantAccountId:
+    Type: String
+  pS3Bucket:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/s3/environment/bucket-name
+  pS3Region:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/management-services/s3/region
+  pTransitAccountId:
+    Type: String
+  pTenantVpcPrefix:
+    Type: String
+  pTenantVpcCidrBlock:
+    Type: String
+  pTenantVpcTenancy:
+    Type: String
+    Default: default
+    AllowedValues:
+      - default
+      - dedicated
+  pTenantVpcApplicationSubnetACidrBlock:
+    Type: String
+  pTenantVpcApplicationSubnetBCidrBlock:
+    Type: String
+  pTenantVpcDataSubnetACidrBlock:
+    Type: String
+  pTenantVpcDataSubnetBCidrBlock:
+    Type: String
+  pTenantVpcTransitGatewayAttachmentSubnetACidrBlock:
+    Type: String
+  pTenantVpcTransitGatewayAttachmentSubnetBCidrBlock:
+    Type: String
+  pTransitGatewayId:
+    Type: String
+
+Resources:
+  rTenantTwoTierVpc:
+    Type: Custom::TenantTwoTierVpc
+    Properties:
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:function:CompliantFramework-CfnRunner
+      AccountId: !Ref pTenantAccountId
+      StackName: !Sub ${pTenantVpcPrefix}-vpc
+      TemplateUrl: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/compliant-framework-management-services-core/${templateName}
+        - templateName: templates/service-catalog/tenant-services/tenant-two-tier-vpc/V1.0.0/tenant-two-tier-vpc.yml
+      Capabilities:
+        - CAPABILITY_IAM
+      Parameters:
+        - Key: pTenantVpcPrefix
+          Value: !Ref pTenantVpcPrefix
+        - Key: pTenantVpcCidrBlock
+          Value: !Ref pTenantVpcCidrBlock
+        - Key: pTenantVpcTenancy
+          Value: !Ref pTenantVpcTenancy
+        - Key: pTenantVpcApplicationSubnetACidrBlock
+          Value: !Ref pTenantVpcApplicationSubnetACidrBlock
+        - Key: pTenantVpcApplicationSubnetBCidrBlock
+          Value: !Ref pTenantVpcApplicationSubnetBCidrBlock
+        - Key: pTenantVpcDataSubnetACidrBlock
+          Value: !Ref pTenantVpcDataSubnetACidrBlock
+        - Key: pTenantVpcDataSubnetBCidrBlock
+          Value: !Ref pTenantVpcDataSubnetBCidrBlock
+        - Key: pTenantVpcTransitGatewayAttachmentSubnetACidrBlock
+          Value: !Ref pTenantVpcTransitGatewayAttachmentSubnetACidrBlock
+        - Key: pTenantVpcTransitGatewayAttachmentSubnetBCidrBlock
+          Value: !Ref pTenantVpcTransitGatewayAttachmentSubnetBCidrBlock
+        - Key: pTransitGatewayId
+          Value: !Ref pTransitGatewayId
+        - Key: pLoggingBucketArn
+          Value: !Sub arn:${AWS::Partition}:s3:::flow-logs-${AWS::AccountId}-${AWS::Region}
+
+  rAttachTenant:
+    Type: Custom::rAttachTenant
+    Properties:
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:function:CompliantFramework-CfnRunner
+      AccountId: !Ref pTransitAccountId
+      StackName: !Sub transit-attach-tenant-${pTenantVpcPrefix}
+      TemplateUrl: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/compliant-framework-transit-core/${templateName}
+        - templateName: templates/transit-attach-tenant.yml
+      Parameters:
+        - Key: pTgwAttachId
+          Value: !GetAtt rTenantTwoTierVpc.oTransitGatewayAttachmentId
