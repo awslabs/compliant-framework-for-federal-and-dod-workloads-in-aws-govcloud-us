@@ -1,0 +1,135 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Resources:
+  # This role has full access and can delegate permissions to every service and resource in AWS.
+  rAdministratorsAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompliantFrameworkAdministratorsAccessRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref AWS::AccountId
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
+  rAdministratorsGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: CompliantFrameworkAdministratorsGroup
+      Policies:
+        - PolicyName: assume-role-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - !GetAtt rAdministratorsAccessRole.Arn
+
+  # This group monitors accounts for compliance with security requirements. This user can access logs
+  # and events to investigate potential security breaches or potential malicious activity.
+  rSecurityAuditorsAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompliantFrameworkSecurityAuditorsAccessRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref AWS::AccountId
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/SecurityAudit
+  rSecurityAuditorsGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: CompliantFrameworkSecurityAuditorsGroup
+      Policies:
+        - PolicyName: assume-role-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - !GetAtt rSecurityAuditorsAccessRole.Arn
+
+  # This group can view a list of AWS resources and basic metadata in the account across all
+  # services. The user cannot read resource content or metadata that goes beyond the quota and list
+  # information for resources.
+  rViewOnlyAccessRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompliantFrameworkViewOnlyAccessRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref AWS::AccountId
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess
+  rViewOnlyGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28 # Explicit name used for clear identification of role
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: CompliantFrameworkViewOnlyGroup
+      Policies:
+        - PolicyName: assume-role-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - !GetAtt rViewOnlyAccessRole.Arn

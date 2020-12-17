@@ -1,0 +1,203 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pSolutionInfoBuiltBy:
+    Type: String
+    Default: wwps-proserve-us-dod
+  pSolutionInfoName:
+    Type: String
+    Default: compliant-framework-for-federal-and-dod-workloads-in-aws-govcloud-us
+  pSolutionInfoVersion:
+    Type: String
+  pS3Bucket:
+    Type: String
+  pS3Region:
+    Type: String
+  pRepo:
+    Type: String
+
+  pEnableDirectoryVpc:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  pEnableExternalAccessVpc:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+
+  #
+  # Transit Gateway Information
+  #
+  pTransitGatewayId:
+    Type: String
+
+  pPrincipalOrgId:
+    Type: String
+
+Conditions:
+  cEnableDirectoryVpc: !Equals [true, !Ref pEnableDirectoryVpc]
+  cEnableExternalAccessVpc: !Equals [true, !Ref pEnableExternalAccessVpc]
+
+Resources:
+  #
+  # Assets Bucket
+  #
+  rAssetsBucketStack:
+    Condition: cEnableDirectoryVpc
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pPrincipalOrgId: !Ref pPrincipalOrgId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/management-services-assets-bucket.yml
+
+  #
+  # Directory VPC
+  #
+  rDirectoryVpcStack:
+    Condition: cEnableDirectoryVpc
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pName: directory
+        pLoggingBucketArn: !Sub arn:${AWS::Partition}:s3:::flow-logs-${AWS::AccountId}-${AWS::Region}
+        pTransitGatewayId: !Ref pTransitGatewayId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/management-services-directory-vpc.yml
+
+  #
+  # Management Services VPC
+  #
+  rManagementServicesVpcStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pName: management-services
+        pLoggingBucketArn: !Sub arn:${AWS::Partition}:s3:::flow-logs-${AWS::AccountId}-${AWS::Region}
+        pTransitGatewayId: !Ref pTransitGatewayId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/management-services-vpc.yml
+
+  #
+  # External Access VPC
+  #
+  rExternalAccessVpcStack:
+    Condition: cEnableExternalAccessVpc
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pName: external-access
+        pLoggingBucketArn: !Sub arn:${AWS::Partition}:s3:::flow-logs-${AWS::AccountId}-${AWS::Region}
+        pTransitGatewayId: !Ref pTransitGatewayId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/management-services-external-access-vpc.yml
+
+  #
+  # Service Catalog Portfolio
+  #
+  rServiceCatalogStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pS3Bucket: !Ref pS3Bucket
+        pS3Region: !Ref pS3Region
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/service-catalog/portfolio.yml
+
+Outputs:
+  oDirectoryVpcId:
+    Condition: cEnableDirectoryVpc
+    Value: !GetAtt rDirectoryVpcStack.Outputs.oVpcId
+  oDirectoryVpcApplicationSubnetAId:
+    Condition: cEnableDirectoryVpc
+    Value: !GetAtt rDirectoryVpcStack.Outputs.oApplicationSubnetAId
+  oDirectoryVpcApplicationSubnetBId:
+    Condition: cEnableDirectoryVpc
+    Value: !GetAtt rDirectoryVpcStack.Outputs.oApplicationSubnetBId
+  oDirectoryVpcTransitGatewayAttachmentId:
+    Condition: cEnableDirectoryVpc
+    Value: !GetAtt rDirectoryVpcStack.Outputs.oTransitGatewayAttachmentId
+
+  oManagementServicesVpcId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oVpcId
+  oManagementServicesVpcApplicationSubnetAId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oApplicationSubnetAId
+  oManagementServicesVpcApplicationSubnetBId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oApplicationSubnetBId
+  oManagementServicesVpcApplicationRtA:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oApplicationRtA
+  oManagementServicesVpcApplicationRtB:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oApplicationRtB
+  oManagementServicesVpcDataSubnetAId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oDataSubnetAId
+  oManagementServicesVpcDataSubnetBId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oDataSubnetBId
+  oManagementServicesVpcDataRtA:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oDataRtA
+  oManagementServicesVpcDataRtB:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oDataRtB
+  oManagementServicesVpcTransitGatewayAttachmentSubnetAId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oTransitGatewayAttachmentSubnetAId
+  oManagementServicesVpcTransitGatewayAttachmentSubnetBId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oTransitGatewayAttachmentSubnetBId
+  oManagementServicesVpcTransitGatewayAttachmentRtId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oTransitGatewayAttachmentRtId
+  oManagementServicesVpcTransitGatewayAttachmentId:
+    Value: !GetAtt rManagementServicesVpcStack.Outputs.oTransitGatewayAttachmentId
+
+  oExternalAccessVpcTransitGatewayAttachmentId:
+    Condition: cEnableExternalAccessVpc
+    Value: !GetAtt rExternalAccessVpcStack.Outputs.oTransitGatewayAttachmentId

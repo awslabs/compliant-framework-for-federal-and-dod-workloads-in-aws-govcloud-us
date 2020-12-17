@@ -1,0 +1,256 @@
+{
+    "partition": "aws-us-gov",
+    "region": "us-gov-west-1",
+    "complianceSet": "tbd",
+    "core": {
+        "notificationsEmail": "team-alias+core-notifications@somewhere.com",
+        "primaryRegion": "us-gov-west-1"
+    },
+    "deployToRegions": [
+        "us-gov-west-1"
+    ],
+    "environments": [
+        "alpha01",
+        "beta",
+        "prod"
+    ],
+    "stackSets": {
+        "security-baseline": {
+            "parameters": {
+                "pNotificationsEmail": "team-alias+env-notifications@amazon.com"
+            }
+        },
+        "backup-services": {
+            "parameters": {}
+        }
+    },
+    "federation": {
+        "enabled": true,
+        "sourceEnvironment": "prod",
+        "region": "us-gov-west-1",
+        "name": "KeyCloak"
+    },
+    "central": {
+        "accountId": "############",
+        "organizationId": "o-xxxxxxxxxx",
+        "ssmParameters": {
+            "/compliant/framework/logging/account/id": "############",
+            "/compliant/framework/central/service-catalog/provider-name": "Central Services",
+            "/compliant/framework/central/service-catalog/access-role-name": "CompliantFrameworkAccountAccessRole"
+        }
+    },
+    "logging": {
+        "accountId": "############"
+    },
+    "transit": {
+        "us-gov-west-1": {
+            "environments": {
+                "alpha01": {
+                    "accountId": "############"
+                },
+                "beta": {
+                    "accountId": "############"
+                },
+                "prod": {
+                    "accountId": "############"
+                }
+            },
+            "enableVpcFirewall": false,
+            "enableVirtualFirewall": true,
+            "ssmParameters": {
+                "/compliant/framework/transit/transit-gateway/amazon-side-asn": "65224",
+                "/compliant/framework/transit/firewall-vpc/cidr": "10.0.0.0/21",
+                "/compliant/framework/transit/firewall-vpc/nipr-cidr": "0.0.0.0/0",
+                "/compliant/framework/transit/firewall-vpc/instance-tenancy": "default",
+                "/compliant/framework/transit/firewall-vpc/external-subnet/a/cidr": "10.0.0.0/24",
+                "/compliant/framework/transit/firewall-vpc/external-subnet/b/cidr": "10.0.1.0/24",
+                "/compliant/framework/transit/firewall-vpc/external-subnet/c/cidr": "10.0.2.0/24",
+                "/compliant/framework/transit/firewall-vpc/internal-subnet/a/cidr": "10.0.3.0/24",
+                "/compliant/framework/transit/firewall-vpc/internal-subnet/b/cidr": "10.0.4.0/24",
+                "/compliant/framework/transit/firewall-vpc/internal-subnet/c/cidr": "10.0.5.0/24",
+                "/compliant/framework/transit/firewall-vpc/management-subnet/a/cidr": "10.0.6.0/27",
+                "/compliant/framework/transit/firewall-vpc/management-subnet/b/cidr": "10.0.6.32/27",
+                "/compliant/framework/transit/firewall-vpc/management-subnet/c/cidr": "10.0.6.64/27",
+                "/compliant/framework/transit/firewall-vpc/tgw-attach-subnet/a/cidr": "10.0.7.208/28",
+                "/compliant/framework/transit/firewall-vpc/tgw-attach-subnet/b/cidr": "10.0.7.224/28",
+                "/compliant/framework/transit/firewall-vpc/tgw-attach-subnet/c/cidr": "10.0.7.240/28",
+                "/compliant/framework/transit/firewall-vpc/igw/enabled": "true",
+                "/compliant/framework/transit/firewall-vpc/tgw/attached": "true",
+                "/compliant/framework/transit/firewall-vpc/virtual-firewall/a/asn": "65200",
+                "/compliant/framework/transit/firewall-vpc/virtual-firewall/b/asn": "65210"
+            }
+        }
+    },
+    "managementServices": {
+        "us-gov-west-1": {
+            "environments": {
+                "alpha01": {
+                    "accountId": "############"
+                },
+                "beta": {
+                    "accountId": "############"
+                },
+                "prod": {
+                    "accountId": "############"
+                }
+            },
+            "enableDirectoryVpc": true,
+            "enableExternalAccessVpc": true,
+            "ssmParameters": {
+                "/compliant/framework/management-services/directory-vpc/cidr": "10.0.10.0/24",
+                "/compliant/framework/management-services/directory-vpc/instance-tenancy": "default",
+                "/compliant/framework/management-services/directory-vpc/application-subnet/a/cidr": "10.0.10.0/27",
+                "/compliant/framework/management-services/directory-vpc/application-subnet/b/cidr": "10.0.10.32/27",
+                "/compliant/framework/management-services/directory-vpc/application-subnet/c/cidr": "10.0.10.64/27",
+                "/compliant/framework/management-services/directory-vpc/data-subnet/a/cidr": "10.0.10.96/27",
+                "/compliant/framework/management-services/directory-vpc/data-subnet/b/cidr": "10.0.10.128/27",
+                "/compliant/framework/management-services/directory-vpc/data-subnet/c/cidr": "10.0.10.160/27",
+                "/compliant/framework/management-services/directory-vpc/tgw-attach-subnet/a/cidr": "10.0.10.208/28",
+                "/compliant/framework/management-services/directory-vpc/tgw-attach-subnet/b/cidr": "10.0.10.224/28",
+                "/compliant/framework/management-services/directory-vpc/tgw-attach-subnet/c/cidr": "10.0.10.240/28",
+                "/compliant/framework/management-services/management-services-vpc/cidr": "10.0.20.0/22",
+                "/compliant/framework/management-services/management-services-vpc/instance-tenancy": "default",
+                "/compliant/framework/management-services/management-services-vpc/application-subnet/a/cidr": "10.0.20.0/24",
+                "/compliant/framework/management-services/management-services-vpc/application-subnet/b/cidr": "10.0.21.0/24",
+                "/compliant/framework/management-services/management-services-vpc/application-subnet/c/cidr": "10.0.22.0/24",
+                "/compliant/framework/management-services/management-services-vpc/data-subnet/a/cidr": "10.0.23.0/26",
+                "/compliant/framework/management-services/management-services-vpc/data-subnet/b/cidr": "10.0.23.64/26",
+                "/compliant/framework/management-services/management-services-vpc/data-subnet/c/cidr": "10.0.23.128/26",
+                "/compliant/framework/management-services/management-services-vpc/tgw-attach-subnet/a/cidr": "10.0.23.208/28",
+                "/compliant/framework/management-services/management-services-vpc/tgw-attach-subnet/b/cidr": "10.0.23.224/28",
+                "/compliant/framework/management-services/management-services-vpc/tgw-attach-subnet/c/cidr": "10.0.23.240/28",
+                "/compliant/framework/management-services/external-access-vpc/cidr": "10.0.24.0/24",
+                "/compliant/framework/management-services/external-access-vpc/instance-tenancy": "default",
+                "/compliant/framework/management-services/external-access-vpc/public-subnet/a/cidr": "10.0.24.0/27",
+                "/compliant/framework/management-services/external-access-vpc/public-subnet/b/cidr": "10.0.24.32/27",
+                "/compliant/framework/management-services/external-access-vpc/public-subnet/c/cidr": "10.0.24.64/27",
+                "/compliant/framework/management-services/external-access-vpc/application-subnet/a/cidr": "10.0.24.96/27",
+                "/compliant/framework/management-services/external-access-vpc/application-subnet/b/cidr": "10.0.24.128/27",
+                "/compliant/framework/management-services/external-access-vpc/application-subnet/c/cidr": "10.0.24.160/27",
+                "/compliant/framework/management-services/external-access-vpc/tgw-attach-subnet/a/cidr": "10.0.24.208/28",
+                "/compliant/framework/management-services/external-access-vpc/tgw-attach-subnet/b/cidr": "10.0.24.224/28",
+                "/compliant/framework/management-services/external-access-vpc/tgw-attach-subnet/c/cidr": "10.0.24.240/28"
+            }
+        }
+    },
+    "plugins": {
+        "managed-ad": {
+            "us-gov-west-1": {
+                "actions": [
+                    {
+                        "deploymentAction": "cloudformation",
+                        "actionName": "managed-ad",
+                        "templatePath": "templates/plugin-managed-ad.yml",
+                        "hasTransitGatewayAttachment": false,
+                        "environments": {
+                            "alpha01": {
+                                "accountId": "############"
+                            },
+                            "beta": {
+                                "accountId": "############"
+                            },
+                            "prod": {
+                                "accountId": "############"
+                            }
+                        },
+                        "ssmParameters": {
+                            "/compliant/framework/management-services/managed-ad/edition": "Standard",
+                            "/compliant/framework/management-services/managed-ad/dns-name": "ad.somewhere.com",
+                            "/compliant/framework/management-services/managed-ad/net-bios-name": "ad"
+                        }
+                    }
+                ]
+            }
+        },
+        "keycloak-sso": {
+            "us-gov-west-1": {
+                "actions": [
+                    {
+                        "deploymentAction": "cloudformation",
+                        "actionName": "keycloak-sso",
+                        "templatePath": "templates/plugin-keycloak-sso.yml",
+                        "hasTransitGatewayAttachment": false,
+                        "environments": {
+                            "alpha01": {
+                                "accountId": "############"
+                            },
+                            "beta": {
+                                "accountId": "############"
+                            },
+                            "prod": {
+                                "accountId": "############"
+                            }
+                        },
+                        "ssmParameters": {
+                            "/compliant/framework/management-services/keycloak-sso/ecs-instance-type": "c5.xlarge"
+                        }
+                    }
+                ]
+            }
+        },
+        "workspaces": {
+            "us-gov-west-1": {
+                "actions": [
+                    {
+                        "deploymentAction": "cloudformation",
+                        "actionName": "workspaces",
+                        "templatePath": "templates/plugin-workspaces.yml",
+                        "hasTransitGatewayAttachment": true,
+                        "environments": {
+                            "alpha01": {
+                                "accountId": "############"
+                            },
+                            "beta": {
+                                "accountId": "############"
+                            },
+                            "prod": {
+                                "accountId": "############"
+                            }
+                        },
+                        "ssmParameters": {
+                            "/compliant/framework/workspaces/workspaces-vpc/cidr": "10.15.0.0/16",
+                            "/compliant/framework/workspaces/workspaces-vpc/administrators-subnet/a/cidr": "10.15.0.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/administrators-subnet/b/cidr": "10.15.4.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/administrators-subnet/c/cidr": "10.15.8.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/power-users-subnet/a/cidr": "10.15.12.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/power-users-subnet/b/cidr": "10.15.16.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/power-users-subnet/c/cidr": "10.15.20.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/users-subnet/a/cidr": "10.15.24.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/users-subnet/b/cidr": "10.15.28.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/users-subnet/c/cidr": "10.15.32.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/partners-subnet/a/cidr": "10.15.36.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/partners-subnet/b/cidr": "10.15.40.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/partners-subnet/c/cidr": "10.15.44.0/22",
+                            "/compliant/framework/workspaces/workspaces-vpc/tgw-attach-subnet/a/cidr": "10.15.255.208/28",
+                            "/compliant/framework/workspaces/workspaces-vpc/tgw-attach-subnet/b/cidr": "10.15.255.224/28",
+                            "/compliant/framework/workspaces/workspaces-vpc/tgw-attach-subnet/c/cidr": "10.15.255.240/28"
+                        }
+                    }
+                ]
+            }
+        },
+        "elasticsearch-kibana": {
+            "us-gov-west-1": {
+                "actions": [
+                    {
+                        "deploymentAction": "cloudformation",
+                        "actionName": "elasticsearch-kibana",
+                        "templatePath": "templates/plugin-elasticsearch-kibana.yml",
+                        "hasTransitGatewayAttachment": false,
+                        "environments": {
+                            "alpha01": {
+                                "accountId": "############"
+                            },
+                            "beta": {
+                                "accountId": "############"
+                            },
+                            "prod": {
+                                "accountId": "############"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

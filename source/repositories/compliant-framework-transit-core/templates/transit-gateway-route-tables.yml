@@ -1,0 +1,212 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pSolutionInfoBuiltBy:
+    Type: String
+    Default: wwps-proserve-us-dod
+  pSolutionInfoName:
+    Type: String
+    Default: compliant-framework-for-federal-and-dod-workloads-in-aws-govcloud-us
+  pSolutionInfoVersion:
+    Type: String
+  pS3Bucket:
+    Type: String
+  pS3Region:
+    Type: String
+  pRepo:
+    Type: String
+
+  pEnableDirectoryVpc:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/directory-vpc/enabled
+  pEnableExternalAccessVpc:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/external-access-vpc/enabled
+  pEnableVpcFirewall:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/vpc-firewall/enabled
+  pEnableVirtualFirewall:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/virtual-firewall/enabled
+
+  pManagementServicesVpcTgwAttachId:
+    Type: String
+  pDirectoryVpcTgwAttachId:
+    Type: String
+    Default: xxxxxx
+  pExternalAccessVpcTgwAttachId:
+    Type: String
+    Default: xxxxxx
+
+Conditions:
+  cEnableDirectoryVpc: !Equals [true, !Ref pEnableDirectoryVpc]
+  cEnableExternalAccessVpc: !Equals [true, !Ref pEnableExternalAccessVpc]
+  cEnableVpcFirewall: !Equals [true, !Ref pEnableVpcFirewall]
+  cEnableVirtualFirewall: !Equals [true, !Ref pEnableVirtualFirewall]
+
+Resources:
+  #
+  # Internal Route Table
+  #
+  rInternalRtStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pManagementServicesVpcTgwAttachId: !Ref pManagementServicesVpcTgwAttachId
+        pExternalAccessVpcTgwAttachId: !Ref pExternalAccessVpcTgwAttachId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: !Sub
+            - templates/${config}/transit-gateway-route-tables-${name}.yml
+            - config: !If [cEnableVpcFirewall, vpc-firewall, virtual-firewall]
+              name: internal
+  #
+  # Management Services Route Table
+  #
+  rManagementServicesRtStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pManagementServicesVpcTgwAttachId: !Ref pManagementServicesVpcTgwAttachId
+        pDirectoryVpcTgwAttachId: !Ref pDirectoryVpcTgwAttachId
+        pExternalAccessVpcTgwAttachId: !Ref pExternalAccessVpcTgwAttachId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: !Sub
+            - templates/${config}/transit-gateway-route-tables-${name}.yml
+            - config: !If [cEnableVpcFirewall, vpc-firewall, virtual-firewall]
+              name: management-services
+  #
+  # Firewall Route Table
+  #
+  rFirewallRtStack:
+    Condition: cEnableVirtualFirewall
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pManagementServicesVpcTgwAttachId: !Ref pManagementServicesVpcTgwAttachId
+        pDirectoryVpcTgwAttachId: !Ref pDirectoryVpcTgwAttachId
+        pExternalAccessVpcTgwAttachId: !Ref pExternalAccessVpcTgwAttachId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/virtual-firewall/transit-gateway-route-tables-firewall.yml
+  #
+  # DMZ
+  #
+  rDmzRtStack:
+    Condition: cEnableVpcFirewall
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/vpc-firewall/transit-gateway-route-tables-dmz.yml
+  #
+  # Inspection
+  #
+  rInspectionRtStack:
+    Condition: cEnableVpcFirewall
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pManagementServicesVpcTgwAttachId: !Ref pManagementServicesVpcTgwAttachId
+        pDirectoryVpcTgwAttachId: !Ref pDirectoryVpcTgwAttachId
+        pExternalAccessVpcTgwAttachId: !Ref pExternalAccessVpcTgwAttachId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/vpc-firewall/transit-gateway-route-tables-inspection.yml
+  #
+  # Directory
+  #
+  rDirectoryRtStack:
+    Condition: cEnableDirectoryVpc
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pManagementServicesVpcTgwAttachId: !Ref pManagementServicesVpcTgwAttachId
+        pDirectoryVpcTgwAttachId: !Ref pDirectoryVpcTgwAttachId
+        pExternalAccessVpcTgwAttachId: !Ref pExternalAccessVpcTgwAttachId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: !Sub
+            - templates/${config}/transit-gateway-route-tables-${name}.yml
+            - config: !If [cEnableVpcFirewall, vpc-firewall, virtual-firewall]
+              name: directory
+  #
+  # External Access
+  #
+  rExternalAccessRtStack:
+    Condition: cEnableExternalAccessVpc
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pManagementServicesVpcTgwAttachId: !Ref pManagementServicesVpcTgwAttachId
+        pDirectoryVpcTgwAttachId: !Ref pDirectoryVpcTgwAttachId
+        pExternalAccessVpcTgwAttachId: !Ref pExternalAccessVpcTgwAttachId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: !Sub
+            - templates/${config}/transit-gateway-route-tables-${name}.yml
+            - config: !If [cEnableVpcFirewall, vpc-firewall, virtual-firewall]
+              name: external-access

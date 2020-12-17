@@ -1,0 +1,295 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: "AWS Backup Policy Deployment"
+
+#####################################################
+#
+# Paramters
+#
+#####################################################
+
+Parameters:
+  ##################### GLOBAL PARAMETERS ########################################
+  pBackupAdminRoleName:
+    Type: String
+    Default: BackupAdmin
+  #  pCrossRegionSelection:
+  #    Type: String
+  #    AllowedValues:
+  #      - ""
+  #      - us-east-1
+  #      - us-east-2
+  #      - us-west-1
+  #      - us-west-2
+  #      - us-gov-west-1
+  #      - us-gov-east-1
+  pBackupTagKey:
+    Type: String
+    Default: BackupPolicy
+  pBackupCancelMinutes:
+    Type: Number
+    Default: 240
+  pBackupCompletionMinutes:
+    Type: Number
+    Default: 720
+
+  #################### Policy 1 Parameters #######################################
+  pBackupPolicy1Name:
+    Type: String
+    Default: standard
+  pBackupPolicy1VaultName:
+    Type: String
+    Default: standard
+    Description: Default should be the same name as the backup policy
+  pBackupPolicy1Days:
+    Type: String
+    Default: 14
+  pBackupPolicy1Weeks:
+    Type: String
+    Default: 42
+  pBackupPolicy1Months:
+    Type: String
+    Default: 365
+  pBackupPolicy1ToColdStoreDays:
+    Type: String
+    Default: 60
+  pBackupPolicy1TagValue:
+    Type: String
+    Default: standard
+  pBackupPolicy1DailySchedule:
+    Type: String
+    Description: Default will run daily at 5:00 AM EST
+    Default: (0 9 * * ? *)
+  pBackupPolicy1WeeklySchedule:
+    Type: String
+    Description: Default will run weekly on Sunday at 5:00 AM EST
+    Default: (0 9 ? * SUN *)
+  pBackupPolicy1MonthlySchedule:
+    Type: String
+    Description: Default will run the first day of each month at 5:00 AM EST
+    Default: (0 9 1 * ? *)
+#  pBackupPolicy1CrossRegionCopy:
+#    Type: String
+#    Default: false
+#    AllowedValues:
+#      - true
+#      - false
+
+#####################################################
+#
+# Conditions
+#
+#####################################################
+
+Conditions:
+  ###### If true will create a cross region copy of the backup ###################
+  #  cPolicy1CrossRegion: !Equals [true, !Ref pBackupPolicy1CrossRegionCopy]
+
+  ###### If blank will bypass cold storage parameter #############################
+  cPolicy1ColdStorage: !Not [!Equals ["", !Ref pBackupPolicy1ToColdStoreDays]]
+
+  ###### If blank will bypass deletion #############################
+  cPolicy1LifecycleDays: !Not [!Equals ["", !Ref pBackupPolicy1Days]]
+  cPolicy1LifecycleWeeks: !Not [!Equals ["", !Ref pBackupPolicy1Weeks]]
+  cPolicy1LifecycleMonths: !Not [!Equals ["", !Ref pBackupPolicy1Months]]
+
+#####################################################
+#
+# Resources
+#
+#####################################################
+
+Resources:
+  ########## CREATE SERVICE ROLE FOR BACKUP AND RESTORE ##########################
+
+  rAWSBackupAutomationRole: # Create a role that allows AWS Backup serivce to assume it for managed backup activities
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref pBackupAdminRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: "Allow"
+          Principal:
+            Service:
+              - "backup.amazonaws.com"
+              - "lambda.amazonaws.com"
+          Action:
+            - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+  ########## CREATE KMS KEY ######################################################
+
+  rKMSKey: #c Create KMS Key to protect backups
+    Type: AWS::KMS::Key
+    Properties:
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: backup-key-policy
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${rAWSBackupAutomationRole}
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${rAWSBackupAutomationRole}
+            Action:
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource: "*"
+
+  ########## CREATE BACKUP POLICY 1 ##############################################
+
+  rBackupPolicy1: # Create a backup policy in AWS Backup service
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Ref pBackupPolicy1Name
+        BackupPlanRule:
+          - Lifecycle:
+              DeleteAfterDays: !If
+                - cPolicy1LifecycleDays
+                - !Ref pBackupPolicy1Days
+                - !Ref "AWS::NoValue"
+            RuleName: !Join
+              - ""
+              - - !Ref pBackupPolicy1TagValue
+                - "_daily"
+            ScheduleExpression: !Sub cron${pBackupPolicy1DailySchedule}
+            StartWindowMinutes: !Ref pBackupCancelMinutes
+            CompletionWindowMinutes: !Ref pBackupCompletionMinutes
+            TargetBackupVault: !Ref rBackupPolicy1Vault
+          - Lifecycle:
+              DeleteAfterDays: !If
+                - cPolicy1LifecycleWeeks
+                - !Ref pBackupPolicy1Weeks
+                - !Ref "AWS::NoValue"
+            RuleName: !Join
+              - ""
+              - - !Ref pBackupPolicy1TagValue
+                - "_weekly"
+            ScheduleExpression: !Sub cron${pBackupPolicy1WeeklySchedule}
+            StartWindowMinutes: !Ref pBackupCancelMinutes
+            CompletionWindowMinutes: !Ref pBackupCompletionMinutes
+            TargetBackupVault: !Ref rBackupPolicy1Vault
+          - Lifecycle:
+              DeleteAfterDays: !If
+                - cPolicy1LifecycleMonths
+                - !Ref pBackupPolicy1Months
+                - !Ref "AWS::NoValue"
+              MoveToColdStorageAfterDays: !If
+                - cPolicy1ColdStorage
+                - !Ref pBackupPolicy1ToColdStoreDays
+                - !Ref "AWS::NoValue"
+            RuleName: !Join
+              - ""
+              - - !Ref pBackupPolicy1TagValue
+                - "_monthly"
+            ScheduleExpression: !Sub cron${pBackupPolicy1MonthlySchedule}
+            StartWindowMinutes: !Ref pBackupCancelMinutes
+            CompletionWindowMinutes: !Ref pBackupCompletionMinutes
+            TargetBackupVault: !Ref rBackupPolicy1Vault
+  #            CopyActions:
+  #             !If
+  #             - cPolicy1CrossRegion
+  #              -
+  #                -
+  #                  Lifecycle:
+  #                    DeleteAfterDays:
+  #                      !If
+  #                        - cPolicy1Lifecycle
+  #                        - !Ref pBackupPolicy1Days
+  #                        - !Ref "AWS::NoValue"
+  #                    MoveToColdStorageAfterDays:
+  #                     !If
+  #                        - cPolicy1ColdStorage
+  #                        - !Ref pBackupPolicy1ToColdStoreDays
+  #                        - !Ref "AWS::NoValue"
+  #                 DestinationBackupVaultArn: !Sub
+  #                    - arn:${AWS::Partition}:backup:${Region}:${AWS::AccountId}:backup-vault:Default
+  #                    - { Region: !Ref pCrossRegionSelection}
+  #              - !Ref AWS::NoValue
+
+  rBackupPolicy1Resources: # Create a resource policy to associate target resources with the policy based on the tag value
+    Type: AWS::Backup::BackupSelection
+    DependsOn: rAWSBackupAutomationRole
+    Properties:
+      BackupPlanId: !Ref rBackupPolicy1
+      BackupSelection:
+        IamRoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${pBackupAdminRoleName}
+        ListOfTags:
+          - ConditionType: STRINGEQUALS
+            ConditionKey: !Ref pBackupTagKey
+            ConditionValue: !Ref pBackupPolicy1TagValue
+        SelectionName: !Ref pBackupPolicy1TagValue
+
+  rBackupPolicy1Vault: # Create a separate vault in the priamry region
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Ref pBackupPolicy1VaultName
+      EncryptionKeyArn: !GetAtt rKMSKey.Arn
+
+#####################################################
+#
+# Outputs
+#
+#####################################################
+
+Outputs:
+  oAWSBackupAutomationRole:
+    Description: Role used for backup and restore processes
+    Value: !Ref rAWSBackupAutomationRole
+
+  oBackupPolicy1:
+    Description: Backup plan ID
+    Value: !Ref rBackupPolicy1
+
+  oBackupPolicy1Vault:
+    Description: Backup vault name
+    Value: !Ref rBackupPolicy1Vault

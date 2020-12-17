@@ -1,0 +1,93 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pTgwAttachId:
+    Type: String
+
+  pEnableDirectoryVpc:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/directory-vpc/enabled
+  pEnableExternalAccessVpc:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/external-access-vpc/enabled
+  pEnableVpcFirewall:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/vpc-firewall/enabled
+  pEnableVirtualFirewall:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/virtual-firewall/enabled
+
+  pInternalRtId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/internal-route-table/id
+  pManagementServicesRtId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/management-services-route-table/id
+
+  pDirectoryRtId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/directory-route-table/id
+  pFirewallRtId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/firewall-route-table/id
+  pInspectionRtId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/inspection-route-table/id
+  pExternalAccessRtId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/external-access-route-table/id
+
+Conditions:
+  cEnableDirectoryVpc: !Equals [true, !Ref pEnableDirectoryVpc]
+  cEnableVpcFirewall: !Equals [true, !Ref pEnableVpcFirewall]
+  cEnableVirtualFirewall: !Equals [true, !Ref pEnableVirtualFirewall]
+  cEnableExternalAccessVpc: !Equals [true, !Ref pEnableExternalAccessVpc]
+
+Resources:
+  rTenantVpcAssociation:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pTgwAttachId
+      TransitGatewayRouteTableId: !Ref pInternalRtId
+  rTenantVpcPropagationTopManagementServicesRt:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pTgwAttachId
+      TransitGatewayRouteTableId: !Ref pManagementServicesRtId
+  rTenantVpcPropagationToInspectionRt:
+    Condition: cEnableVpcFirewall
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pTgwAttachId
+      TransitGatewayRouteTableId: !Ref pInspectionRtId
+  rTenantVpcPropagationToFirewallRt:
+    Condition: cEnableVirtualFirewall
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pTgwAttachId
+      TransitGatewayRouteTableId: !Ref pFirewallRtId
+  rTenantVpcPropagationToDirectoryRt:
+    Condition: cEnableDirectoryVpc
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pTgwAttachId
+      TransitGatewayRouteTableId: !Ref pDirectoryRtId
+  rTenantVpcPropagationToExternalAccessRt:
+    Condition: cEnableExternalAccessVpc
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref pTgwAttachId
+      TransitGatewayRouteTableId: !Ref pExternalAccessRtId

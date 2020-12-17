@@ -1,0 +1,342 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  #
+  # Tenant VPC Information
+  #
+  pTenantVpcPrefix:
+    Type: String
+  pTenantVpcCidrBlock:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+  pTenantVpcTenancy:
+    Type: String
+  pTenantVpcApplicationSubnetACidrBlock:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+  pTenantVpcApplicationSubnetBCidrBlock:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+  pTenantVpcDataSubnetACidrBlock:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+  pTenantVpcDataSubnetBCidrBlock:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+  pTenantVpcTransitGatewayAttachmentSubnetACidrBlock:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+  pTenantVpcTransitGatewayAttachmentSubnetBCidrBlock:
+    Type: String
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$'
+
+  #
+  # Transit Gateway
+  #
+  pTransitGatewayId:
+    Type: String
+
+  #
+  # Logging Information
+  #
+  pLoggingBucketArn:
+    Type: String
+
+Resources:
+  #
+  # VPC
+  #
+  rVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref pTenantVpcCidrBlock
+      InstanceTenancy: !Ref pTenantVpcTenancy
+      EnableDnsHostnames: True
+      EnableDnsSupport: True
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-vpc
+  rVpcFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 365
+  rVpcFlowLogCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: !GetAtt rVpcFlowLogGroup.Arn
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+  rVpcFlowLogCloudWatch:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt rVpcFlowLogCloudWatchRole.Arn
+      LogDestination: !GetAtt rVpcFlowLogGroup.Arn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+
+  rVpcFlowLogS3:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      LogDestinationType: s3
+      LogDestination: !Ref pLoggingBucketArn
+      ResourceId: !Ref rVpc
+      ResourceType: VPC
+      TrafficType: ALL
+
+  #
+  # SUBNETS
+  #
+  rApplicationSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTenantVpcApplicationSubnetACidrBlock
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-app-subnet-a
+  rApplicationSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTenantVpcApplicationSubnetBCidrBlock
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-app-subnet-b
+  rDataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTenantVpcDataSubnetACidrBlock
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-data-subnet-a
+  rDataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTenantVpcDataSubnetBCidrBlock
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-data-subnet-b
+  rTransitGatewayAttachmentSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTenantVpcTransitGatewayAttachmentSubnetACidrBlock
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-tgw-attach-subnet-a
+  rTransitGatewayAttachmentSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref rVpc
+      CidrBlock: !Ref pTenantVpcTransitGatewayAttachmentSubnetBCidrBlock
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref AWS::Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-tgw-attach-subnet-b
+
+  #
+  # ROUTE TABLES
+  #
+  rApplicationRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-app-subnet-rt
+  rApplicationSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rApplicationSubnetA
+      RouteTableId: !Ref rApplicationRt
+  rApplicationSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rApplicationSubnetB
+      RouteTableId: !Ref rApplicationRt
+  rDataRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-data-subnet-rt
+  rDataSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rDataSubnetA
+      RouteTableId: !Ref rDataRt
+  rDataSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rDataSubnetB
+      RouteTableId: !Ref rDataRt
+  rTransitGatewayAttachmentRt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref rVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-tgw-attach-subnet-rt
+  rTransitGatewayAttachmentSubnetRtAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetA
+      RouteTableId: !Ref rTransitGatewayAttachmentRt
+  rTransitGatewayAttachmentSubnetRtAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref rTransitGatewayAttachmentSubnetB
+      RouteTableId: !Ref rTransitGatewayAttachmentRt
+
+  #
+  # TRANSIT GATEWAY ATTACHMENT / ROUTING
+  #
+  rTransitGatewayAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      SubnetIds:
+        - !Ref rTransitGatewayAttachmentSubnetA
+        - !Ref rTransitGatewayAttachmentSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${pTenantVpcPrefix}-tgw-attachment
+      TransitGatewayId: !Ref pTransitGatewayId
+      VpcId: !Ref rVpc
+  rVpcApplicationRtTgwRoute:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rApplicationRt
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref pTransitGatewayId
+  rVpcDataRtTgwRoute:
+    DependsOn: rTransitGatewayAttachment
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref rDataRt
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref pTransitGatewayId
+
+  rSsmParameterTenantVpcId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/id
+      Type: String
+      Value: !Ref rVpc
+  rSsmParameterTenantVpcApplicationSubnetAId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/application-subnet/a/id
+      Type: String
+      Value: !Ref rApplicationSubnetA
+  rSsmParameterTenantVpcApplicationSubnetBId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/application-subnet/b/id
+      Type: String
+      Value: !Ref rApplicationSubnetB
+  rSsmParameterTenantVpcApplicationRtId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/application-subnet-route-table/id
+      Type: String
+      Value: !Ref rApplicationRt
+  rSsmParameterTenantVpcDataSubnetAId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/data-subnet/a/id
+      Type: String
+      Value: !Ref rDataSubnetA
+  rSsmParameterTenantVpcDataSubnetBId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/data-subnet/b/id
+      Type: String
+      Value: !Ref rDataSubnetB
+  rSsmParameterTenantVpcDataRtId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/data-subnet-route-table/id
+      Type: String
+      Value: !Ref rDataRt
+  rSsmParameterTenantVpcTransitGatewayAttachmentSubnetAId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/tgw-attachment-subnet/a/id
+      Type: String
+      Value: !Ref rTransitGatewayAttachmentSubnetA
+  rSsmParameterTenantVpcTransitGatewayAttachmentSubnetBId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/tgw-attachment-subnet/b/id
+      Type: String
+      Value: !Ref rTransitGatewayAttachmentSubnetB
+  rSsmParameterTenantVpcTransitGatewayAttachmentRtId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/tgw-attachment-subnet/route-table/id
+      Type: String
+      Value: !Ref rTransitGatewayAttachmentRt
+  rSsmParameterTenantVpcTransitGatewayAttachmentId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /compliant/framework/tenant/${pTenantVpcPrefix}/vpc/tgw-attachment/id
+      Type: String
+      Value: !Ref rTransitGatewayAttachment
+
+Outputs:
+  oTransitGatewayAttachmentId:
+    Value: !GetAtt rSsmParameterTenantVpcTransitGatewayAttachmentId.Value

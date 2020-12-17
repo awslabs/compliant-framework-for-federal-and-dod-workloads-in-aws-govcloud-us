@@ -1,0 +1,138 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+Description: (SO0130.avm) Account Vending Machine for AWS GovCloud (US)
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: New Tenant Account Information
+        Parameters:
+          - pAccountName
+          - pEmailAddress
+          - pOuPath
+    ParameterLabels:
+      pAccountName:
+        default: Account Name
+      pEmailAddress:
+        default: Account Email
+      pOuPath:
+        default: Organizational Unit Path
+
+Parameters:
+  pAccountName:
+    Type: String
+    Description: This is the name that will appear in the AWS Console
+  pEmailAddress:
+    Type: String
+    Description: |
+      The email address to use for the new account. This email address must not
+      already be associated with another AWS account. You must use a valid email
+      address to complete account creation.
+  pOuPath:
+    Type: String
+    Default: ""
+    Description: |
+      The Organizational Unit path where the account will be placed in GovCloud.
+      ex: environment-usgw1/environment-usgw1-tenants
+
+Rules:
+  ruAccountNameNotNull:
+    Assertions:
+      - Assert: !Not
+          - !Equals
+            - !Ref pAccountName
+            - ""
+        AssertDescription: Account name must be provided
+  ruEmailNotNull:
+    Assertions:
+      - Assert: !Not
+          - !Equals
+            - !Ref pEmailAddress
+            - ""
+        AssertDescription: Account email must be provided
+  ruOuPathNotNull:
+    Assertions:
+      - Assert: !Not
+          - !Equals
+            - !Ref pOuPath
+            - ""
+        AssertDescription: Organizational unit path must be provided
+
+Resources:
+  rGetOu:
+    Type: Custom::GetOu
+    Properties:
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:CompliantFramework-AvmGetOu
+      Parameters:
+        - Key: ou_path
+          Value: !Ref pOuPath
+  rCreateGovCloudAcct:
+    Type: Custom::CreateGovCloudAcct
+    DependsOn: rGetOu
+    Properties:
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:CompliantFramework-AvmCreateGovCloudAccount
+      Parameters:
+        - Key: account_name
+          Value: !Ref pAccountName
+        - Key: email
+          Value: !Ref pEmailAddress
+  rInviteGovCloudAcct:
+    Type: Custom::InviteGovCloudAcct
+    Properties:
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:CompliantFramework-AvmInviteGovCloudAccount
+      Parameters:
+        - Key: govcloud_account_id
+          Value:
+            Fn::GetAtt:
+              - rCreateGovCloudAcct
+              - govcloud_account_id
+  rMoveAccount:
+    Type: Custom::MoveAccount
+    DependsOn: rInviteGovCloudAcct
+    Properties:
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:CompliantFramework-AvmMoveAccount
+      Parameters:
+        - Key: account_id
+          Value:
+            Fn::GetAtt:
+              - rCreateGovCloudAcct
+              - govcloud_account_id
+        - Key: current_parent_id
+          Value:
+            Fn::GetAtt:
+              - rGetOu
+              - current_parent_id
+        - Key: new_ou_id
+          Value:
+            Fn::GetAtt:
+              - rGetOu
+              - new_ou_id
+Outputs:
+  CommercialAccountId:
+    Value:
+      Fn::GetAtt:
+        - rCreateGovCloudAcct
+        - commercial_account_id
+  GovCloudAccountId:
+    Value:
+      Fn::GetAtt:
+        - rCreateGovCloudAcct
+        - govcloud_account_id
+  AccountName:
+    Value: !Ref pAccountName
+  AccountEmail:
+    Value: !Ref pEmailAddress

@@ -1,0 +1,162 @@
+version: 0.2
+
+env:
+  parameter-store:
+    ACCESS_KEY_ID: /compliant/framework/central/aws-us-gov/access-key-id
+    SECRET_ACCESS_KEY: /compliant/framework/central/aws-us-gov/secret-access-key
+
+    GOVCLOUD_CENTRAL_ACCOUNT_ID: /compliant/framework/central/aws-us-gov/id
+    GOVCLOUD_LOGGING_ACCOUNT_ID: /compliant/framework/accounts/core/logging/aws-us-gov/id
+    GOVCLOUD_TRANSIT_ACCOUNT_ID: /compliant/framework/accounts/prod/transit/aws-us-gov/id
+    GOVCLOUD_MANAGEMENT_SERVICES_ACCOUNT_ID: /compliant/framework/accounts/prod/management-services/aws-us-gov/id
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.x
+    commands:
+      - echo "nothing to do in install"
+  build:
+    commands:
+      - echo "Starting build `date` in `pwd`"
+
+      - python --version
+
+      # Create config.json
+      - python create_config.py --stack-name $STACK_NAME --out-file config.json --aws-access-key-id $ACCESS_KEY_ID --aws-secret-access-key $SECRET_ACCESS_KEY --region us-gov-west-1
+
+      # Configure AWS CLI
+      - aws configure set aws_access_key_id $ACCESS_KEY_ID
+      - aws configure set aws_secret_access_key $SECRET_ACCESS_KEY
+      - aws configure set region us-gov-west-1
+      - export AWS_DEFAULT_REGION=us-gov-west-1
+      - export AWS_REGION=us-gov-west-1
+
+      # Create Core Repos
+      - python create_repository.py --name compliant-framework-central-pipeline --branch core-pipeline
+      - python create_repository.py --name compliant-framework-central-core --branch core-pipeline
+
+      # Create Environment Repos
+      - python create_repository.py --name compliant-framework-transit-core --branch environment-pipeline
+      - python create_repository.py --name compliant-framework-management-services-core --branch environment-pipeline
+      - python create_repository.py --name compliant-framework-security-baseline --branch environment-pipeline
+
+      #
+      # Deploy Framework
+      #
+      - template_dir="$PWD"
+      # Important: CDK global version number
+      - cdk_version=1.71.0
+      # Install the global aws-cdk package
+      - npm install -g aws-cdk@$cdk_version
+      # Set up config files
+      - cat config.json
+      - cp config.json compliant-framework-central-pipeline/configs/config.json
+      # CDK Build
+      - cd compliant-framework-central-pipeline
+      - npm install
+      - npm run build
+      # CDK Bootstrap
+      - cdk bootstrap aws://$GOVCLOUD_CENTRAL_ACCOUNT_ID/us-gov-west-1
+      - cdk list
+      # CDK Support Stack - Logging Account
+      - ASSUME_ROLE_ARN="arn:aws-us-gov:iam::$GOVCLOUD_LOGGING_ACCOUNT_ID:role/CompliantFrameworkAccountAccessRole"
+      - TEMP_ROLE=`aws sts assume-role --role-arn $ASSUME_ROLE_ARN --role-session-name test`
+      - export AWS_ACCESS_KEY_ID=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.AccessKeyId')
+      - export AWS_SECRET_ACCESS_KEY=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.SecretAccessKey')
+      - export AWS_SESSION_TOKEN=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.SessionToken')
+      - cdk deploy cross-account-support-stack-$GOVCLOUD_LOGGING_ACCOUNT_ID --require-approval never
+      # Reset to Central Account
+      - unset AWS_ACCESS_KEY_ID
+      - unset AWS_SECRET_ACCESS_KEY
+      - unset AWS_SESSION_TOKEN
+      # CDK Support Stack - Transit Account
+      - ASSUME_ROLE_ARN="arn:aws-us-gov:iam::$GOVCLOUD_TRANSIT_ACCOUNT_ID:role/CompliantFrameworkAccountAccessRole"
+      - TEMP_ROLE=`aws sts assume-role --role-arn $ASSUME_ROLE_ARN --role-session-name test`
+      - export AWS_ACCESS_KEY_ID=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.AccessKeyId')
+      - export AWS_SECRET_ACCESS_KEY=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.SecretAccessKey')
+      - export AWS_SESSION_TOKEN=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.SessionToken')
+      - cdk deploy cross-account-support-stack-$GOVCLOUD_TRANSIT_ACCOUNT_ID --require-approval never
+      # Reset to Central Account
+      - unset AWS_ACCESS_KEY_ID
+      - unset AWS_SECRET_ACCESS_KEY
+      - unset AWS_SESSION_TOKEN
+      # CDK Support Stack - Management Services Account
+      - ASSUME_ROLE_ARN="arn:aws-us-gov:iam::$GOVCLOUD_MANAGEMENT_SERVICES_ACCOUNT_ID:role/CompliantFrameworkAccountAccessRole"
+      - TEMP_ROLE=`aws sts assume-role --role-arn $ASSUME_ROLE_ARN --role-session-name test`
+      - export AWS_ACCESS_KEY_ID=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.AccessKeyId')
+      - export AWS_SECRET_ACCESS_KEY=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.SecretAccessKey')
+      - export AWS_SESSION_TOKEN=$(echo "${TEMP_ROLE}" | jq -r '.Credentials.SessionToken')
+      - cdk deploy cross-account-support-stack-$GOVCLOUD_MANAGEMENT_SERVICES_ACCOUNT_ID --require-approval never
+      # Reset to Central Account
+      - unset AWS_ACCESS_KEY_ID
+      - unset AWS_SECRET_ACCESS_KEY
+      - unset AWS_SESSION_TOKEN
+      # Deploy Core Pipeline Stack
+      - cdk deploy core-pipeline-stack --exclusively --require-approval never
+      - python ../wait_for_pipeline.py --name compliant-framework-core-pipeline
+      # Enable Organization Trusted Service Access
+      # NOTE: CloudFormation StackSets is currently not supported and will break the deployment
+      # - aws organizations enable-aws-service-access --service-principal ram.amazonaws.com
+      - aws ram enable-sharing-with-aws-organization || true
+      - aws servicecatalog enable-aws-organizations-access || true
+      # Deploy Prod Pipeline Stack
+      - cdk deploy environment-pipeline-stack --exclusively --require-approval never
+      # NOTE: See above regarding StackSets - Skip waiting for completion
+      # - python ../wait_for_pipeline.py --name compliant-framework-environment-pipeline
+      - cd ..
+
+      #
+      # Update repositories - New changes to an already existing deployment will
+      # trigger the pipeline to run updates. Do this after the pipeline has
+      # been updated to account for pipeline changes
+      #
+
+      # Configure git
+      - git config --global credential.UseHttpPath true
+      - git config --global credential.helper "!aws codecommit credential-helper $@"
+      - git config --global user.email "compliant-framework-info@amazon.com"
+      - git config --global user.name "Compliant Framework"
+
+      # Update Core Repos
+
+      - cd compliant-framework-central-pipeline
+      - git init -b mainline .
+      - git remote add origin https://git-codecommit.us-gov-west-1.amazonaws.com/v1/repos/compliant-framework-central-pipeline
+      - git fetch -p --all
+      - (git add -A && git commit -m "Compliant Framework $VERSION Update" && git rebase -Xtheirs origin/mainline && git push origin mainline) || true
+      - cd ..
+
+      - cd compliant-framework-central-core
+      - git init -b mainline .
+      - git remote add origin https://git-codecommit.us-gov-west-1.amazonaws.com/v1/repos/compliant-framework-central-core
+      - git fetch -p --all
+      - (git add -A && git commit -m "Compliant Framework $VERSION Update" && git rebase -Xtheirs origin/mainline && git push origin mainline) || true
+      - cd ..
+
+      # Update Environment Repos
+
+      - cd compliant-framework-transit-core
+      - git init -b mainline .
+      - git remote add origin https://git-codecommit.us-gov-west-1.amazonaws.com/v1/repos/compliant-framework-transit-core
+      - git fetch -p --all
+      - (git add -A && git commit -m "Compliant Framework $VERSION Update" && git rebase -Xtheirs origin/mainline && git push origin mainline) || true
+      - cd ..
+
+      - cd compliant-framework-management-services-core
+      - git init -b mainline .
+      - git remote add origin https://git-codecommit.us-gov-west-1.amazonaws.com/v1/repos/compliant-framework-management-services-core
+      - git fetch -p --all
+      - (git add -A && git commit -m "Compliant Framework $VERSION Update" && git rebase -Xtheirs origin/mainline && git push origin mainline) || true
+      - cd ..
+
+      - cd compliant-framework-security-baseline
+      - git init -b mainline .
+      - git remote add origin https://git-codecommit.us-gov-west-1.amazonaws.com/v1/repos/compliant-framework-security-baseline
+      - git fetch -p --all
+      - (git add -A && git commit -m "Compliant Framework $VERSION Update" && git rebase -Xtheirs origin/mainline && git push origin mainline) || true
+      - cd ..
+
+  post_build:
+    commands:
+      - echo "Post build completed on `date`"

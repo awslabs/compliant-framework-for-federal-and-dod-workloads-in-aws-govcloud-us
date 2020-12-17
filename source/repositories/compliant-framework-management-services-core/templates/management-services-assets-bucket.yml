@@ -1,0 +1,203 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pPrincipalOrgId:
+    Type: String
+
+Resources:
+  rS3BucketCmk:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Assets - S3 CMK
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-policy-1
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:CancelKeyDeletion
+              - kms:CreateAlias
+              - kms:CreateGrant
+              - kms:CreateKey
+              - kms:DeleteAlias
+              - kms:DeleteImportedKeyMaterial
+              - kms:DescribeKey
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:EnableKey
+              - kms:EnableKeyRotation
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GenerateRandom
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:GetParametersForImport
+              - kms:ImportKeyMaterial
+              - kms:ListAliases
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListKeys
+              - kms:ListResourceTags
+              - kms:ListRetirableGrants
+              - kms:PutKeyPolicy
+              - kms:RetireGrant
+              - kms:RevokeGrant
+              - kms:ScheduleKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - kms:UpdateKeyDescription
+            Resource: "*"
+          - Sid: Allow Account root use of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GenerateRandom
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListAliases
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListKeys
+              - kms:ListResourceTags
+              - kms:ListRetirableGrants
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+          - Sid: Allow S3 service use of the key
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GenerateRandom
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListAliases
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListKeys
+              - kms:ListResourceTags
+              - kms:ListRetirableGrants
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+          - Sid: Allow Organization use of the key
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyPair
+              - kms:GenerateDataKeyPairWithoutPlaintext
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref pPrincipalOrgId
+
+  rSsmParameterCmkArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/management-services/assets-bucket-cmk/arn
+      Type: String
+      Value: !GetAtt rS3BucketCmk.Arn
+
+  rS3BucketCmkAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/compliant-framework/assets/s3
+      TargetKeyId: !Ref rS3BucketCmk
+
+  rS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:${rS3BucketCmkAlias}
+              SSEAlgorithm: aws:kms
+      BucketName: !Sub environment-assets-${AWS::AccountId}-${AWS::Region}
+
+  rS3BucketPolicy:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F16
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref rS3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Action:
+              - s3:*
+            Principal: "*"
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rS3Bucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: AllowOrganizationAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+            Principal:
+              AWS: "*"
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${rS3Bucket}/*
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref pPrincipalOrgId

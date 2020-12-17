@@ -1,0 +1,419 @@
+######################################################################################################################
+#  Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.                                           #
+#                                                                                                                    #
+#  Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance    #
+#  with the License. A copy of the License is located at                                                             #
+#                                                                                                                    #
+#      http://www.apache.org/licenses/LICENSE-2.0                                                                    #
+#                                                                                                                    #
+#  or in the 'license' file accompanying this file. This file is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES #
+#  OR CONDITIONS OF ANY KIND, express or implied. See the License for the specific language governing permissions    #
+#  and limitations under the License.                                                                                #
+######################################################################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  pSolutionInfoBuiltBy:
+    Type: String
+    Default: wwps-proserve-us-dod
+  pSolutionInfoName:
+    Type: String
+    Default: compliant-framework-for-federal-and-dod-workloads-in-aws-govcloud-us
+  pSolutionInfoVersion:
+    Type: String
+  pS3Bucket:
+    Type: String
+  pS3Region:
+    Type: String
+  pRepo:
+    Type: String
+  pManagementServicesAccountId:
+    Type: String
+  pCentralAccountId:
+    Type: String
+  pPrincipalOrgId:
+    Type: String
+  pEnableDirectoryVpc:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  pEnableExternalAccessVpc:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  pEnableVpcFirewall:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  pEnableVirtualFirewall:
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+
+  # Transit Gateway Information
+  pTransitGatewayAmazonSideAsn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /compliant/framework/transit/transit-gateway/amazon-side-asn
+
+Conditions:
+  cEnableDirectoryVpc: !Equals [true, !Ref pEnableDirectoryVpc]
+  cEnableExternalAccessVpc: !Equals [true, !Ref pEnableExternalAccessVpc]
+  cEnableVpcFirewall: !Equals [true, !Ref pEnableVpcFirewall]
+  cEnableVirtualFirewall: !Equals [true, !Ref pEnableVirtualFirewall]
+
+Resources:
+  rSsmParameterEnableDirectoryVpc:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/directory-vpc/enabled
+      Type: String
+      Value: !Ref pEnableDirectoryVpc
+  rSsmParameterEnableExternalAccessVpc:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/external-access-vpc/enabled
+      Type: String
+      Value: !Ref pEnableExternalAccessVpc
+  rSsmParameterEnableVpcFirewall:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/vpc-firewall/enabled
+      Type: String
+      Value: !Ref pEnableVpcFirewall
+  rSsmParameterEnableVirtualFirewall:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/virtual-firewall/enabled
+      Type: String
+      Value: !Ref pEnableVirtualFirewall
+
+  #
+  # Transit Gateway Stack
+  #
+  rTransitGatewayStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pTransitGatewayAmazonSideAsn: !Ref pTransitGatewayAmazonSideAsn
+        pCentralAccountId: !Ref pCentralAccountId
+        pPrincipalOrgId: !Ref pPrincipalOrgId
+        pEnableDirectoryVpc: !Ref pEnableDirectoryVpc
+        pEnableExternalAccessVpc: !Ref pEnableExternalAccessVpc
+        pEnableVpcFirewall: !Ref pEnableVpcFirewall
+        pEnableVirtualFirewall: !Ref pEnableVirtualFirewall
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/transit-gateway.yml
+
+  #
+  # DMZ VPC Stack (VPC Firewall)
+  #
+  rDmzVpcStack:
+    Condition: cEnableVpcFirewall
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pName: dmz
+        pTransitGatewayId: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayId
+        pLoggingBucketArn: !Sub arn:${AWS::Partition}:s3:::flow-logs-${pManagementServicesAccountId}-${AWS::Region}
+        pCentralAccountId: !Ref pCentralAccountId
+        pPrincipalOrgId: !Ref pPrincipalOrgId
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/transit-dmz-vpc.yml
+
+  #
+  # Inspection VPC Stack (VPC Firewall)
+  #
+  rInspectionVpcStack:
+    Condition: cEnableVpcFirewall
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pName: inspection
+        pTransitGatewayId: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayId
+        pLoggingBucketArn: !Sub arn:${AWS::Partition}:s3:::flow-logs-${pManagementServicesAccountId}-${AWS::Region}
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/transit-inspection-vpc.yml
+
+  #
+  # Virtual Firewall VPC Stack (aka VDSS)
+  #
+  rVirtualFirewallVpcStack:
+    Condition: cEnableVirtualFirewall
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pName: firewall
+        pTransitGatewayId: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayId
+        pLoggingBucketArn: !Sub arn:${AWS::Partition}:s3:::flow-logs-${pManagementServicesAccountId}-${AWS::Region}
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/transit-firewall-vpc.yml
+
+  #
+  # Store values into SSM Parameter Store
+  #
+  rSsmParameterFirewallVpcTransitGatewayAttachmentId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/firewall-vpc/tgw-attach/id
+      Type: String
+      Value:
+        !If [
+          cEnableVirtualFirewall,
+          !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallVpcTransitGatewayAttachmentId,
+          no-value,
+        ]
+
+  rTransitGatewayVpnAttachmentFirewall:
+    Condition: cEnableVirtualFirewall
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        pName: firewall
+        pTransitGatewayId: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayId
+        pCustomerGatewayAIpAddress: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAInternalEniPublicIpAddress
+        pCustomerGatewayBIpAddress: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBInternalEniPublicIpAddress
+      Tags:
+        - Key: solution-info:built-by
+          Value: !Ref pSolutionInfoBuiltBy
+        - Key: solution-info:name
+          Value: !Ref pSolutionInfoName
+        - Key: solution-info:version
+          Value: !Ref pSolutionInfoVersion
+      TemplateURL: !Sub
+        - https://${pS3Bucket}.${pS3Region}.amazonaws.com/${pRepo}/${templateName}
+        - templateName: templates/transit-vpn-attachment.yml
+
+  #
+  # Store values into SSM Parameter Store
+  #
+  rSsmParameterFirewallVpnConnectionAId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/firewall-vpc/vpn-connection/a/id
+      Type: String
+      Value:
+        !If [
+          cEnableVirtualFirewall,
+          !GetAtt rTransitGatewayVpnAttachmentFirewall.Outputs.oFirewallVpnConnectionAId,
+          no-value,
+        ]
+  rSsmParameterFirewallVpnConnectionBId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /compliant/framework/transit/firewall-vpc/vpn-connection/b/id
+      Type: String
+      Value:
+        !If [
+          cEnableVirtualFirewall,
+          !GetAtt rTransitGatewayVpnAttachmentFirewall.Outputs.oFirewallVpnConnectionBId,
+          no-value,
+        ]
+
+Outputs:
+  oTransitGatewayId:
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayId
+  oTransitGatewayInternalRouteTableId:
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayInternalRouteTableId
+  oTransitGatewayManagementServicesRouteTableId:
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayManagementServicesRouteTableId
+  oTransitGatewayDirectoryRouteTableId:
+    Condition: cEnableDirectoryVpc
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayDirectoryRouteTableId
+  oTransitGatewayExternalAccessRouteTableId:
+    Condition: cEnableExternalAccessVpc
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayExternalAccessRouteTableId
+  oTransitGatewayFirewallRouteTableId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayFirewallRouteTableId
+
+  oTransitGatewayDmzRouteTableId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayDmzRouteTableId
+  oTransitGatewayInspectionRouteTableId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rTransitGatewayStack.Outputs.oTransitGatewayInspectionRouteTableId
+  oDmzVpcId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rDmzVpcStack.Outputs.oVpcId
+  oDmzVpcPublicSubnetAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rDmzVpcStack.Outputs.oPublicSubnetAId
+  oDmzVpcPublicSubnetBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rDmzVpcStack.Outputs.oPublicSubnetBId
+  oDmzVpcPublicRtId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rDmzVpcStack.Outputs.oPublicRtId
+  oDmzVpcTransitGatewayAttachmentRtId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rDmzVpcStack.Outputs.oTransitGatewayAttachmentRtId
+  oDmzVpcTransitGatewayAttachmentId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rDmzVpcStack.Outputs.oTransitGatewayAttachmentId
+
+  oInspectionVpcId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oVpcId
+  oInspectionVpcPublicSubnetAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oPublicSubnetAId
+  oInspectionVpcPublicSubnetBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oPublicSubnetBId
+  oInspectionVpcPublicRtAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oPublicRtAId
+  oInspectionVpcPublicRtBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oPublicRtBId
+  oInspectionVpcFirewallSubnetAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oFirewallSubnetAId
+  oInspectionVpcFirewallSubnetBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oFirewallSubnetBId
+  oInspectionVpcFirewallRtAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oFirewallRtAId
+  oInspectionVpcFirewallRtBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oFirewallRtBId
+  oInspectionVpcTransitGatewayAttachmentSubnetAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oTransitGatewayAttachmentSubnetAId
+  oInspectionVpcTransitGatewayAttachmentSubnetBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oTransitGatewayAttachmentSubnetBId
+  oInspectionVpcTransitGatewayAttachmentRtAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oTransitGatewayAttachmentRtAId
+  oInspectionVpcTransitGatewayAttachmentRtBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oTransitGatewayAttachmentRtBId
+  oInspectionVpcNatGatewayAId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oNatGatewayAId
+  oInspectionVpcNatGatewayBId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oNatGatewayBId
+  oInspectionVpcTransitGatewayAttachmentId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oTransitGatewayAttachmentId
+  oInspectionVpcFirewallSecurityGroupId:
+    Condition: cEnableVpcFirewall
+    Value: !GetAtt rInspectionVpcStack.Outputs.oFirewallSecurityGroupId
+
+  oVirtualFirewallVpcId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oVpcId
+  oVirtualFirewallVpcInternalSubnetAId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oInternalSubnetAId
+  oVirtualFirewallVpcInternalSubnetBId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oInternalSubnetBId
+  oVirtualFirewallVpcInternalRouteTableId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oInternalRtId
+  oVirtualFirewallVpcExternalSubnetAId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oExternalSubnetAId
+  oVirtualFirewallVpcExternalSubnetBId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oExternalSubnetBId
+  oVirtualFirewallVpcExternalRouteTableAId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oExternalRtAId
+  oVirtualFirewallVpcExternalRouteTableBId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oExternalRtBId
+  oVirtualFirewallVpcManagementSubnetAId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oManagementSubnetAId
+  oVirtualFirewallVpcManagementSubnetBId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oManagementSubnetBId
+  oVirtualFirewallVpcManagementRouteTableId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oManagementRtId
+  oVirtualFirewallVpcFirewallAExternalEniId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAExternalEniId
+  oVirtualFirewallVpcFirewallAExternalEniPPrivateIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAExternalEniPrivateIpAddress
+  oVirtualFirewallVpcFirewallBExternalEniId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBExternalEniId
+  oVirtualFirewallVpcFirewallBExternalEniPrivateIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBExternalEniPrivateIpAddress
+  oVirtualFirewallVpcFirewallAInternalEniId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAInternalEniId
+  oVirtualFirewallVpcFirewallAInternalEniPrivateIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAInternalEniPrivateIpAddress
+  oVirtualFirewallVpcFirewallAInternalEniPublicIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAInternalEniPublicIpAddress
+  oVirtualFirewallVpcFirewallBInternalEniId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBInternalEniId
+  oVirtualFirewallVpcFirewallBInternalEniPrivateIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBInternalEniPrivateIpAddress
+  oVirtualFirewallVpcFirewallBInternalEniPublicIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBInternalEniPublicIpAddress
+  oVirtualFirewallVpcFirewallAManagementEniId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAManagementEniId
+  oVirtualFirewallVpcFirewallAManagementEniPrivateIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallAManagementEniPrivateIpAddress
+  oVirtualFirewallVpcFirewallBManagementEniId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBManagementEniId
+  oVirtualFirewallVpcFirewallBManagementEniPrivateIpAddress:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rVirtualFirewallVpcStack.Outputs.oFirewallBManagementEniPrivateIpAddress
+  oVirtualFirewallVpcFirewallAVpnId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rTransitGatewayVpnAttachmentFirewall.Outputs.oFirewallVpnConnectionAId
+  oVirtualFirewallVpcFirewallBVpnId:
+    Condition: cEnableVirtualFirewall
+    Value: !GetAtt rTransitGatewayVpnAttachmentFirewall.Outputs.oFirewallVpnConnectionBId
