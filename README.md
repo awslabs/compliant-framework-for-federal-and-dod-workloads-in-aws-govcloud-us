@@ -2,7 +2,7 @@
 
 ## Overview
 
-The [Compliant Framework for Federal and DoD Workloads in AWS GovCloud (US)](https://aws.amazon.com/solutions/implementations/compliant-framework-for-federal-and-dod-workloads-in-aws-govcloud-us/).
+The [Compliant Framework for Federal and DoD Workloads in AWS GovCloud (US)](https://aws.amazon.com/solutions/implementations/compliant-framework-for-federal-and-dod-workloads-in-aws-govcloud-us/)
 solution enables you to quickly deploy a secure, scalable, multi-account
 environment in AWS GovCloud (US) based on AWS best practices. This solution is
 architected to follow the Defense Information Systems Agency (DISA) Cloud
@@ -21,7 +21,7 @@ For an overview and solution deployment guide, please visit [Compliant Framework
 IMPORTANT: This solution will not, by itself, make you DoD CC SRG or CMMC
 compliant. It provides the foundational infrastructure from which additional
 complementary solutions can be integrated. The information contained in this
-solution implementation guide is not exhaustive. You must be review, evaluate,
+solution implementation guide is not exhaustive. You must review, evaluate,
 assess, and approve the solution in compliance with your organization’s
 particular security features, tools, and configurations. It is the sole
 responsibility of you and your organization to determine which regulatory
@@ -67,7 +67,7 @@ deploying the solution please see the details on the solution home page:
 
 ```
 ├── deployment                          [folder containing build scripts]
-│   ├── cdk-solution-helper             [A helper function to help deploy lambda function code through S3 buckets]
+│   ├── cdk-solution-helper             [a helper function to help deploy lambda function code through S3 buckets]
 │   ├── framework-nuke                  [helper python scripts to help uninstall the solution]
 └── source                              [source code containing CDK App and lambda functions]
     ├── bin                             [entrypoint of the CDK application]
@@ -85,7 +85,7 @@ the solution home page: [Compliant Framework for Federal and DoD Workloads in
 AWS GovCloud (US)](https://aws.amazon.com/solutions/implementations/compliant-framework-for-federal-and-dod-workloads-in-aws-govcloud-us/).
 To make changes to the solution, using the below steps download or clone this
 repo, update the source code and then run the deployment/build-s3-dist.sh script
-to deploy the updated Lambda code to an Amazon S3 bucket in your account.
+to deploy the updated code to an Amazon S3 bucket in your account.
 
 ### 1. Clone the repository
 
