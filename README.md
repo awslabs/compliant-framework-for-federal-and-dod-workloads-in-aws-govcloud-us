@@ -78,6 +78,16 @@ deploying the solution please see the details on the solution home page:
     ├── repositories                    [folder containing the source code to populate CodeCommit in GovCloud]
 ```
 
+## Post Deployment Notes
+After you have deployed the solution, the Products will not be available in 
+the service catalog. To make the solution available you will need to grant 
+permissions to the Users you wish to deploy products from the service 
+catalog with. This includes giving them access to the ServiceCatalog service
+and the individual portfolios. Access will need to be granted in the 
+public cloud 'central' and govcloud 'prod-managed-services' accounts.
+More infromation on this can be found the Service Catalog Admin Guide:
+[Security in AWS Service Catalog](https://docs.aws.amazon.com/servicecatalog/latest/adminguide/security.html)
+
 ## Creating a Custom Build
 
 The solution can be deployed through the CloudFormation template available on
