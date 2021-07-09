@@ -1,3 +1,13 @@
+#############################
+# Title: InstanceMetadataRemediation
+# Purpose: This cfn creates a lambda function that is invoked on a hourly basis. 
+# The Lambda function queries all ec2 instances that are not enforcing IMDSv2 (http-token = required).
+# It then loops thru and sets IMDS-Hops limit to the value in IMDS-Hops tag or to 1 if the tag does not exist.
+# It will omit instances with the tag 'EnableIMDSv1' if that is required for proper functionality.
+# Author: Matthew Venne
+# Company: stackArmor
+# July 9, 2021
+##############################
 Resources:
   LambdaRole:
     Type: AWS::IAM::Role
