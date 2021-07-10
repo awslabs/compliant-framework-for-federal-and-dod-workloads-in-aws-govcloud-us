@@ -1,3 +1,12 @@
+#############################
+# Title: Enforce-S3-TLS
+# Purpose: This cfn creates a lambda function that is invoked on a hourly basis. 
+# The Lambda function queries all s3 buckets and checks if the bucket policy enforces TLS.  If there is no policy, it creates a policy with the required statement.  
+# If there is a policy, it checks all statements to see if there is a statement that enforces ssl.  If there is not one, it inserts the required statement.
+# Author: Matthew Venne
+# Company: stackArmor
+# July 9, 2021
+##############################
 Resources:
   riamRole:
     Type: AWS::IAM::Role
