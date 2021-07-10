@@ -1,0 +1,108 @@
+#############################
+# Title: Enforce-S3-TLS
+# Purpose: This cfn creates a lambda function that is invoked on a hourly basis. 
+# The Lambda function queries all s3 buckets and checks if the bucket policy enforces TLS.  If there is no policy, it creates a policy with the required statement.  
+# If there is a policy, it checks all statements to see if there is a statement that enforces ssl.  If there is not one, it inserts the required statement.
+# Author: Matthew Venne
+# Company: stackArmor
+# July 9, 2021
+##############################
+Resources:
+  riamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Enforce-S3-TLS-Lambda-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - 
+         PolicyName: "UpdateS3Policy"
+         PolicyDocument:
+           Version: "2012-10-17"
+           Statement:
+              - 
+                Effect: "Allow"
+                Action: 
+                - s3:ListAllMyBuckets
+                - s3:PutBucketPolicy
+                - s3:GetBucketPolicy
+                Resource: "*"
+      ManagedPolicyArns:
+      - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+  rlambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: Enforce_S3_TLS
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt riamRole.Arn
+      Runtime:  python3.8
+      Timeout: 600
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          s3= boto3.client('s3')
+          s3_resource = boto3.resource('s3')
+          buckets=s3.list_buckets()['Buckets']
+
+          region=os.environ['AWS_REGION']
+
+          if "gov" in region:
+              partition='aws-us-gov'
+          else:
+              partition='aws'
+
+          def lambda_handler(event, context):
+
+              for bucket in buckets:
+                  try:
+                      policy=s3.get_bucket_policy(Bucket=bucket['Name'])['Policy']
+                      statements=json.loads(policy)['Statement']
+                      enforcessl={"Action": "s3:*","Effect": "Deny","Resource": ["arn:aws:s3:::bucket-name", "arn:aws:s3:::bucket_name/*"],"Condition": {"Bool": {"aws:SecureTransport": "false"}},"Principal": "*"}
+                      enforcessl['Resource']=['arn:' + partition + ':s3:::' + bucket['Name'],'arn:' + partition + ':s3:::' + bucket['Name']+'/*']
+                      if 'Deny' in [statement['Effect'] for statement in statements] and 'false' in [statement['Condition']['Bool']['aws:SecureTransport'] for statement in statements] and '*' in [statement['Principal'] for statement in statements]:
+                          policy=json.loads(policy)
+                          policy['Statement'].append(enforcessl)
+                          print(bucket['Name'])
+                          s3.put_bucket_policy(
+                              Bucket=bucket['Name'],
+                              Policy=json.dumps(policy))
+                      else:
+                          print("already ssl")
+                  except:
+                      enforcessl={"Id": "BucketPolicy", "Version": "2012-10-17", "Statement": [{"Sid": "EnforceTLS","Action": "s3:*","Effect": "Deny","Resource": ["arn:aws:s3:::bucket-name", "arn:aws:s3:::bucket_name/*"],"Condition": {"Bool": {"aws:SecureTransport": "false"}},"Principal": "*"}]}
+                      enforcessl['Statement'][0]['Resource']=['arn:' + partition + ':s3:::' + bucket['Name'],'arn:' + partition + ':s3:::' + bucket['Name']+'/*']
+                      response = s3.put_bucket_policy(
+                          Bucket=bucket['Name'],
+                          Policy=json.dumps(enforcessl)
+                      )
+  CWRule:
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "HourlyLambdaRule"
+      ScheduleExpression: "rate(1 hour)"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+              - "rlambdaFunction"
+              - "Arn"
+          Id: "TargetFunctionV1"
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Principal: events.amazonaws.com
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref rlambdaFunction
+      SourceArn: !GetAtt CWRule.Arn
